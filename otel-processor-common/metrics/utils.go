@@ -98,7 +98,7 @@ func (c *CardinalityLimiter) ShouldKeep(metric pmetric.Metric, attrs pcommon.Map
 	metricName := metric.Name()
 	
 	// Count unique attribute combinations
-	key := generateMetricKey(metric, attrs)
+	_ = generateMetricKey(metric, attrs)
 	
 	count, exists := c.metricCounts[metricName]
 	if !exists {

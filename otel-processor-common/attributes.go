@@ -77,7 +77,7 @@ func (ap *AttributeProcessor) ProcessAttributes(attrs pcommon.Map) {
 // redactValue applies redaction patterns to a string value
 func (ap *AttributeProcessor) redactValue(value string) string {
 	for _, pattern := range ap.redactPatterns {
-		value = pattern.ReplaceAllString(value, "[REDACTED]")
+		value = pattern.ReplaceAllString(value, "${1}[REDACTED]")
 	}
 	return value
 }
@@ -109,8 +109,10 @@ func (ae *AttributeEnricher) AddStaticAttribute(key string, value interface{}) {
 	switch v := value.(type) {
 	case string:
 		val.SetStr(v)
-	case int, int64:
-		val.SetInt(v.(int64))
+	case int:
+		val.SetInt(int64(v))
+	case int64:
+		val.SetInt(v)
 	case float64:
 		val.SetDouble(v)
 	case bool:
@@ -155,11 +157,11 @@ const (
 
 // SensitivePatterns defines common patterns for sensitive data
 var SensitivePatterns = []string{
-	`(?i)password[\s]*[:=][\s]*\S+`,
-	`(?i)api[_-]?key[\s]*[:=][\s]*\S+`,
-	`(?i)token[\s]*[:=][\s]*\S+`,
-	`(?i)secret[\s]*[:=][\s]*\S+`,
-	`(?i)bearer\s+\S+`,
+	`(?i)(password[\s]*[:=][\s]*)\S+`,
+	`(?i)(api[_-]?key[\s]*[:=][\s]*)\S+`,
+	`(?i)(token[\s]*[:=][\s]*)\S+`,
+	`(?i)(secret[\s]*[:=][\s]*)\S+`,
+	`(?i)(bearer\s+)\S+`,
 	`\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b`, // Email
 	`\b(?:\d{4}[-\s]?){3}\d{4}\b`,                          // Credit card
 	`\b\d{3}-\d{2}-\d{4}\b`,                                 // SSN

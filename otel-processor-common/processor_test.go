@@ -158,7 +158,7 @@ func TestWithTimeout(t *testing.T) {
 			err := processor.WithTimeout(context.Background(), fn)
 			if tt.wantErr {
 				require.Error(t, err)
-				assert.Contains(t, err.Error(), "timeout")
+				assert.Contains(t, err.Error(), "timed out")
 			} else {
 				assert.NoError(t, err)
 			}
