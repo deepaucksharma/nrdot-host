@@ -1,0 +1,8 @@
+[Unit]
+Description=NRDOT Network Resource Discovery and Optimization Toolkit
+Documentation=https://github.com/NRDOT/nrdot-host
+Requires=nrdot-supervisor.service
+After=nrdot-supervisor.service
+
+[Install]
+WantedBy=multi-user.target

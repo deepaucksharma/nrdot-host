@@ -1,0 +1,13 @@
+[Unit]
+Description=NRDOT Privileged Helper Socket
+Documentation=https://github.com/NRDOT/nrdot-host
+
+[Socket]
+ListenStream=/run/nrdot/privileged.sock
+SocketMode=0660
+SocketUser=root
+SocketGroup=nrdot
+RemoveOnStop=true
+
+[Install]
+WantedBy=sockets.target

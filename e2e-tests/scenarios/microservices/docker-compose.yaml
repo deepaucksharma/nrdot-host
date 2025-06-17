@@ -1,0 +1,96 @@
+version: '3.8'
+
+services:
+  # NRDOT Collector with all processors
+  nrdot-collector:
+    image: nrdot-collector:latest
+    container_name: nrdot-collector
+    volumes:
+      - ./configs/nrdot-config.yaml:/etc/nrdot/config.yaml
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "13133:13133" # Health check
+      - "8888:8888"   # Prometheus metrics
+    environment:
+      - OTEL_SERVICE_NAME=nrdot-collector
+    networks:
+      - nrdot-test
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:13133/health"]
+      interval: 5s
+      timeout: 10s
+      retries: 5
+
+  # Frontend service
+  frontend:
+    build: ./services/frontend
+    container_name: frontend
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://nrdot-collector:4317
+      - OTEL_SERVICE_NAME=frontend
+      - BACKEND_URL=http://backend:8080
+    ports:
+      - "3000:3000"
+    depends_on:
+      - nrdot-collector
+      - backend
+    networks:
+      - nrdot-test
+
+  # Backend service
+  backend:
+    build: ./services/backend
+    container_name: backend
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://nrdot-collector:4317
+      - OTEL_SERVICE_NAME=backend
+      - DATABASE_URL=postgres://user:password@database:5432/testdb
+      - API_KEY=sk-1234567890abcdef  # Test secret
+    ports:
+      - "8080:8080"
+    depends_on:
+      - nrdot-collector
+      - database
+    networks:
+      - nrdot-test
+
+  # Database
+  database:
+    image: postgres:15-alpine
+    container_name: database
+    environment:
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=testdb
+    ports:
+      - "5432:5432"
+    networks:
+      - nrdot-test
+
+  # Prometheus for metrics verification
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    volumes:
+      - ./configs/prometheus.yaml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    networks:
+      - nrdot-test
+
+  # Jaeger for trace verification
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: jaeger
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16686:16686"  # UI
+      - "14268:14268"  # Collector
+    networks:
+      - nrdot-test
+
+networks:
+  nrdot-test:
+    external: true

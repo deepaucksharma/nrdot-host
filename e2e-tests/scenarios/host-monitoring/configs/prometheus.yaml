@@ -1,0 +1,22 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'nrdot-host'
+    static_configs:
+      - targets: ['localhost:8888']
+        labels:
+          component: 'nrdot'
+          
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+        labels:
+          component: 'node-exporter'
+
+  - job_name: 'nrdot-internal'
+    static_configs:
+      - targets: ['localhost:8889']
+        labels:
+          component: 'nrdot-telemetry'

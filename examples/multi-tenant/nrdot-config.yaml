@@ -1,0 +1,440 @@
+# Multi-Tenant NRDOT-HOST Configuration
+# Designed for serving multiple isolated tenants from a single deployment
+
+# Server configuration
+server:
+  host: "0.0.0.0"
+  port: 8080
+  log_level: "${LOG_LEVEL:info}"
+  
+  # Multi-tenant aware logging
+  log_format: "json"
+  log_fields:
+    - "tenant_id"
+    - "request_id"
+    - "user_id"
+
+# Multi-tenant API configuration
+api:
+  enabled: true
+  
+  # Tenant identification
+  tenant_identification:
+    strategy: "subdomain"  # subdomain, header, path, jwt_claim
+    subdomain:
+      pattern: "^([a-z0-9-]+)\\.api\\.example\\.com$"
+    header:
+      name: "X-Tenant-ID"
+    path:
+      pattern: "/api/v1/tenants/([^/]+)/"
+    jwt_claim:
+      name: "tenant_id"
+      
+  # Per-tenant rate limiting
+  rate_limit:
+    enabled: true
+    type: "tenant_based"
+    default_limit: 1000
+    default_burst: 100
+    tenant_limits:
+      - tenant_id: "enterprise-a"
+        limit: 10000
+        burst: 1000
+      - tenant_id: "enterprise-b"
+        limit: 5000
+        burst: 500
+      - tenant_id: "starter-*"
+        limit: 100
+        burst: 10
+        
+  # Tenant-based authentication
+  auth:
+    type: "multi_tenant"
+    providers:
+      - name: "oauth2"
+        tenants: ["enterprise-a", "enterprise-b"]
+        config:
+          issuer: "https://auth.example.com"
+          audience: "nrdot-api"
+      - name: "saml"
+        tenants: ["enterprise-c"]
+        config:
+          idp_url: "https://idp.enterprise-c.com"
+      - name: "api_key"
+        tenants: ["*"]
+        config:
+          header: "X-API-Key"
+
+# Multi-tenant data sources
+sources:
+  - name: "kafka-multi-tenant"
+    type: "kafka"
+    config:
+      brokers: ["kafka1:9092", "kafka2:9092", "kafka3:9092"]
+      
+      # Topic mapping per tenant
+      topic_mapping:
+        strategy: "prefix"  # prefix, suffix, dedicated
+        prefix:
+          pattern: "${tenant_id}-events"
+        dedicated:
+          mappings:
+            enterprise-a: "enterprise-a-events"
+            enterprise-b: "enterprise-b-events"
+            default: "shared-events"
+            
+      # Consumer group isolation
+      consumer_group_pattern: "nrdot-${tenant_id}"
+      
+      # Partition assignment by tenant
+      partition_strategy: "tenant_hash"
+      
+  - name: "http-webhooks"
+    type: "http"
+    config:
+      # Tenant-specific endpoints
+      endpoints:
+        - path: "/webhooks/${tenant_id}"
+          method: "POST"
+          
+      # Tenant validation
+      tenant_validation:
+        enabled: true
+        allowed_tenants_header: "X-Allowed-Tenants"
+        
+  - name: "s3-tenant-buckets"
+    type: "s3"
+    config:
+      # Bucket per tenant
+      bucket_pattern: "nrdot-${tenant_id}-data"
+      
+      # IAM role per tenant
+      assume_role_pattern: "arn:aws:iam::${account_id}:role/nrdot-${tenant_id}"
+      
+      # Prefix isolation
+      prefix_pattern: "tenant/${tenant_id}/"
+
+# Tenant-aware processing
+processors:
+  - name: "tenant-validator"
+    type: "tenant_validate"
+    config:
+      # Ensure tenant context
+      require_tenant_id: true
+      validate_tenant_exists: true
+      
+      # Tenant registry
+      registry:
+        type: "dynamodb"
+        table: "nrdot-tenants"
+        cache_ttl: "5m"
+        
+  - name: "tenant-enricher"
+    type: "enrich"
+    config:
+      # Add tenant metadata
+      tenant_metadata:
+        - field: "tenant_name"
+          source: "registry"
+        - field: "tenant_tier"
+          source: "registry"
+        - field: "tenant_region"
+          source: "registry"
+          
+  - name: "quota-enforcer"
+    type: "quota"
+    config:
+      # Per-tenant quotas
+      quotas:
+        - resource: "events_per_day"
+          default: 1000000
+          tenant_overrides:
+            enterprise-a: 100000000
+            enterprise-b: 50000000
+        - resource: "storage_gb"
+          default: 100
+          tenant_overrides:
+            enterprise-a: 10000
+            enterprise-b: 5000
+            
+      # Quota enforcement
+      enforcement:
+        hard_limit: true
+        notification_threshold: 0.8
+        grace_period: "24h"
+        
+  - name: "data-isolation"
+    type: "isolation"
+    config:
+      # Ensure data doesn't leak between tenants
+      isolation_level: "strict"
+      
+      # Field-level isolation
+      tenant_fields:
+        - "tenant_id"
+        - "org_id"
+        
+      # Validation rules
+      cross_tenant_check: true
+      fail_on_violation: true
+      
+  - name: "tenant-transform"
+    type: "transform"
+    config:
+      # Tenant-specific transformations
+      tenant_configs:
+        enterprise-a:
+          mappings:
+            - source: "$.user_id"
+              target: "enterprise_user_id"
+        enterprise-b:
+          mappings:
+            - source: "$.employee_id"
+              target: "user_identifier"
+        default:
+          mappings:
+            - source: "$.id"
+              target: "record_id"
+
+# Multi-tenant outputs
+outputs:
+  - name: "elasticsearch-multi-tenant"
+    type: "elasticsearch"
+    config:
+      # Cluster per tier
+      clusters:
+        enterprise:
+          hosts: ["es-enterprise-1:9200", "es-enterprise-2:9200"]
+          index_pattern: "${tenant_id}-events-${date:yyyy.MM}"
+        standard:
+          hosts: ["es-standard-1:9200", "es-standard-2:9200"]
+          index_pattern: "shared-${tenant_id}-${date:yyyy.MM}"
+          
+      # Index templates per tenant
+      index_templates:
+        enabled: true
+        pattern: "${tenant_id}-*"
+        
+      # Security
+      security:
+        enabled: true
+        username_pattern: "nrdot-${tenant_id}"
+        role_pattern: "nrdot-${tenant_id}-role"
+        
+  - name: "s3-data-lake"
+    type: "s3"
+    config:
+      # Tenant isolation in data lake
+      bucket: "nrdot-data-lake"
+      prefix_pattern: "tenants/${tenant_id}/year=${year}/month=${month}/day=${day}/"
+      
+      # Partition by tenant
+      partitions:
+        - "tenant_id"
+        - "year"
+        - "month"
+        - "day"
+        
+      # Access control
+      bucket_policy:
+        enforce_tenant_isolation: true
+        cross_tenant_access: "deny"
+        
+  - name: "tenant-database"
+    type: "postgresql"
+    config:
+      # Database isolation strategies
+      isolation_mode: "schema"  # database, schema, row_level
+      
+      # Schema isolation
+      schema:
+        pattern: "tenant_${tenant_id}"
+        auto_create: true
+        
+      # Row-level security
+      row_level:
+        enabled: true
+        tenant_column: "tenant_id"
+        policy: "tenant_id = current_setting('app.tenant_id')"
+        
+      # Connection pooling per tenant
+      connection_pools:
+        strategy: "per_tenant"
+        min_connections: 2
+        max_connections: 10
+
+# Tenant management
+tenant_management:
+  # Tenant registry
+  registry:
+    type: "database"
+    config:
+      table: "tenants"
+      cache: true
+      cache_ttl: "5m"
+      
+  # Tenant lifecycle
+  lifecycle:
+    # Auto-provisioning
+    auto_provision:
+      enabled: true
+      default_tier: "starter"
+      default_quotas:
+        events_per_day: 100000
+        storage_gb: 10
+        retention_days: 30
+        
+    # Tenant onboarding
+    onboarding:
+      create_resources: true
+      resources:
+        - kafka_topics
+        - s3_buckets
+        - database_schemas
+        - elasticsearch_indices
+        
+    # Tenant offboarding
+    offboarding:
+      soft_delete: true
+      retention_period: "90d"
+      archive_data: true
+      archive_location: "s3://nrdot-archive/"
+      
+  # Tenant isolation
+  isolation:
+    # Network isolation
+    network:
+      strategy: "vpc"  # vpc, security_group, namespace
+      vpc_per_tenant: false
+      security_group_per_tenant: true
+      
+    # Resource isolation
+    resources:
+      cpu_shares_per_tenant: 1000
+      memory_limit_per_tenant: "4GB"
+      iops_limit_per_tenant: 1000
+      
+    # Data isolation
+    data:
+      encryption_per_tenant: true
+      kms_key_per_tenant: true
+      backup_isolation: true
+
+# Multi-tenant monitoring
+monitoring:
+  # Per-tenant metrics
+  tenant_metrics:
+    enabled: true
+    metrics:
+      - "events_processed"
+      - "storage_used"
+      - "api_requests"
+      - "error_rate"
+      - "latency_p99"
+      
+    # Tenant dashboards
+    dashboards:
+      auto_create: true
+      template: "tenant-dashboard-template.json"
+      
+  # Tenant-aware alerting
+  alerting:
+    # Per-tenant alerts
+    tenant_alerts:
+      - name: "high_error_rate"
+        condition: "error_rate > 0.05"
+        severity: "warning"
+      - name: "quota_exceeded"
+        condition: "usage > quota * 0.9"
+        severity: "critical"
+        
+    # Alert routing
+    routing:
+      - tenant_tier: "enterprise"
+        channel: "pagerduty"
+      - tenant_tier: "standard"
+        channel: "email"
+        
+  # Usage tracking
+  usage_tracking:
+    enabled: true
+    metrics:
+      - metric: "events"
+        unit: "count"
+        aggregation: "sum"
+      - metric: "storage"
+        unit: "bytes"
+        aggregation: "max"
+      - metric: "api_calls"
+        unit: "count"
+        aggregation: "sum"
+        
+    # Billing integration
+    billing:
+      enabled: true
+      provider: "stripe"
+      sync_interval: "1h"
+
+# Tenant-specific configuration
+tenant_configs:
+  # Override defaults per tenant
+  enterprise-a:
+    rate_limit: 10000
+    retention_days: 365
+    features:
+      - "advanced_analytics"
+      - "custom_processors"
+      - "dedicated_support"
+      
+  enterprise-b:
+    rate_limit: 5000
+    retention_days: 180
+    features:
+      - "advanced_analytics"
+      
+  default:
+    rate_limit: 1000
+    retention_days: 30
+    features:
+      - "basic_analytics"
+
+# Feature flags per tenant
+feature_flags:
+  # Global features
+  global:
+    new_ui: true
+    beta_api: false
+    
+  # Tenant-specific features
+  tenant_features:
+    enterprise-a:
+      custom_dashboards: true
+      ml_insights: true
+    enterprise-b:
+      custom_dashboards: true
+      ml_insights: false
+    default:
+      custom_dashboards: false
+      ml_insights: false
+
+# Multi-tenant security
+security:
+  # Tenant isolation enforcement
+  isolation_enforcement:
+    enabled: true
+    strict_mode: true
+    audit_violations: true
+    
+  # Cross-tenant access control
+  cross_tenant_access:
+    default: "deny"
+    exceptions:
+      - from: "admin"
+        to: "*"
+        permissions: ["read"]
+        
+  # Tenant-specific encryption
+  encryption:
+    key_per_tenant: true
+    key_rotation_days: 90
+    algorithm: "AES-256-GCM"

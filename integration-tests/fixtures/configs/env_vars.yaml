@@ -1,0 +1,48 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:${TEST_METRIC_PORT:-4317}
+
+processors:
+  batch:
+    timeout: 1s
+
+  attributes:
+    actions:
+      - key: service.name
+        value: ${TEST_SERVICE_NAME}
+        action: upsert
+      - key: api.key
+        value: ${TEST_API_KEY}
+        action: insert
+
+exporters:
+  logging:
+    loglevel: ${TEST_LOG_LEVEL:-info}
+
+  otlp:
+    endpoint: ${BACKEND_ENDPOINT:-mock-backend:4317}
+    headers:
+      api-key: ${TEST_API_KEY}
+    tls:
+      insecure: true
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [batch, attributes]
+      exporters: [logging, otlp]
+
+  telemetry:
+    logs:
+      level: ${TEST_LOG_LEVEL:-info}
+    metrics:
+      address: 0.0.0.0:8888
+
+  extensions: [health_check]
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133

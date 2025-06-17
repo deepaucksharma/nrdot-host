@@ -1,0 +1,295 @@
+version: '3.8'
+
+# Production Docker Compose Stack
+# Optimized for production deployment with security and performance
+
+networks:
+  nrdot-frontend:
+    driver: bridge
+  nrdot-backend:
+    driver: bridge
+    internal: true
+  nrdot-data:
+    driver: bridge
+    internal: true
+
+volumes:
+  nrdot-config:
+    driver: local
+  nrdot-data:
+    driver: local
+  nrdot-logs:
+    driver: local
+
+secrets:
+  nr_license_key:
+    external: true
+  api_auth_token:
+    external: true
+
+services:
+  # Configuration Engine (internal network only)
+  config-engine:
+    image: ${REGISTRY:-docker.io/newrelic}/nrdot-config-engine:${TAG:-latest}
+    container_name: nrdot-config-engine
+    networks:
+      - nrdot-backend
+    volumes:
+      - nrdot-config:/etc/nrdot
+      - type: bind
+        source: ./production-config.yaml
+        target: /etc/nrdot/source/nrdot-config.yaml
+        read_only: true
+    environment:
+      - NRDOT_CONFIG_ENGINE_MODE=watch
+      - NRDOT_CONFIG_PATH=/etc/nrdot/source/nrdot-config.yaml
+      - NRDOT_WATCH_INTERVAL=60s
+      - NRDOT_LOG_LEVEL=info
+      - NRDOT_VALIDATION_ENABLED=true
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    restart: always
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/nrdot-config-engine", "health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # Privileged Helper (isolated, minimal exposure)
+  privileged-helper:
+    image: ${REGISTRY:-docker.io/newrelic}/nrdot-privileged-helper:${TAG:-latest}
+    container_name: nrdot-privileged-helper
+    networks:
+      - nrdot-data
+    volumes:
+      - type: tmpfs
+        target: /var/run/nrdot
+        tmpfs:
+          size: 100M
+    environment:
+      - NRDOT_PRIVILEGED_ALLOWED_UIDS=10001
+      - NRDOT_PRIVILEGED_RATE_LIMIT=100/minute
+      - NRDOT_LOG_LEVEL=warn
+      - NRDOT_PRIVILEGED_AUDIT_LOG=/var/log/nrdot/privileged-audit.log
+    cap_add:
+      - SYS_PTRACE
+      - DAC_READ_SEARCH
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+      - seccomp:unconfined
+    pid: host
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+        reservations:
+          cpus: '0.05'
+          memory: 64M
+    restart: always
+    healthcheck:
+      test: ["CMD", "test", "-S", "/var/run/nrdot/privileged-helper.sock"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # Supervisor (backend network)
+  supervisor:
+    image: ${REGISTRY:-docker.io/newrelic}/nrdot-supervisor:${TAG:-latest}
+    container_name: nrdot-supervisor
+    networks:
+      - nrdot-backend
+    volumes:
+      - nrdot-config:/etc/nrdot:ro
+      - nrdot-data:/var/lib/nrdot
+      - type: tmpfs
+        target: /var/run/nrdot
+        tmpfs:
+          size: 50M
+    environment:
+      - NRDOT_SUPERVISOR_CONFIG=/etc/nrdot/supervisor.yaml
+      - NRDOT_RESTART_STRATEGY=exponential
+      - NRDOT_MAX_RESTARTS=5
+      - NRDOT_LOG_LEVEL=info
+    depends_on:
+      config-engine:
+        condition: service_healthy
+      privileged-helper:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    restart: always
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/nrdot-supervisor", "health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # OpenTelemetry Collector
+  collector:
+    image: ${REGISTRY:-docker.io/newrelic}/nrdot-collector:${TAG:-latest}
+    container_name: nrdot-collector
+    networks:
+      - nrdot-frontend
+      - nrdot-backend
+      - nrdot-data
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+    volumes:
+      - nrdot-config:/etc/otel:ro
+      - nrdot-data:/var/lib/otel
+    environment:
+      - NRDOT_COLLECTOR_CONFIG=/etc/otel/otelcol-config.yaml
+      - OTEL_RESOURCE_ATTRIBUTES=service.name=nrdot-collector,deployment.environment=production
+      - GOMAXPROCS=4
+      - GOMEMLIMIT=2GiB
+      - NEW_RELIC_LICENSE_KEY_FILE=/run/secrets/nr_license_key
+    secrets:
+      - nr_license_key
+    depends_on:
+      config-engine:
+        condition: service_healthy
+      privileged-helper:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 1G
+    restart: always
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:13133/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # API Server (frontend network with auth)
+  api-server:
+    image: ${REGISTRY:-docker.io/newrelic}/nrdot-api-server:${TAG:-latest}
+    container_name: nrdot-api-server
+    networks:
+      - nrdot-frontend
+      - nrdot-backend
+    ports:
+      - "8080:8080"
+    volumes:
+      - nrdot-config:/etc/nrdot:ro
+      - nrdot-data:/var/lib/nrdot:ro
+    environment:
+      - NRDOT_API_PORT=8080
+      - NRDOT_API_HOST=0.0.0.0
+      - NRDOT_API_AUTH_ENABLED=true
+      - NRDOT_API_AUTH_TOKEN_FILE=/run/secrets/api_auth_token
+      - NRDOT_API_TLS_ENABLED=false  # Enable with proper certs
+      - NRDOT_API_CORS_ENABLED=false
+      - NRDOT_API_METRICS_ENABLED=true
+      - NRDOT_LOG_LEVEL=info
+      - NRDOT_API_READ_TIMEOUT=30s
+      - NRDOT_API_WRITE_TIMEOUT=30s
+    secrets:
+      - api_auth_token
+    depends_on:
+      supervisor:
+        condition: service_healthy
+      collector:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    restart: always
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # Log aggregator (optional)
+  fluentbit:
+    image: fluent/fluent-bit:latest
+    container_name: nrdot-fluentbit
+    networks:
+      - nrdot-backend
+    volumes:
+      - nrdot-logs:/var/log/nrdot:ro
+      - ./configs/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
+    environment:
+      - FLB_LOG_LEVEL=info
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    restart: always
+    read_only: true
+    profiles:
+      - logging
+
+  # Reverse proxy / Load balancer (optional)
+  nginx:
+    image: nginx:alpine
+    container_name: nrdot-nginx
+    networks:
+      - nrdot-frontend
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./configs/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    depends_on:
+      - api-server
+      - collector
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+    restart: always
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    profiles:
+      - proxy

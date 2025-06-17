@@ -1,0 +1,122 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+  
+  # Additional receivers for specific data types
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'metrics-only'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['localhost:9090']
+  
+  filelog:
+    include: ["/var/log/*.log"]
+    start_at: beginning
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+
+  batch/traces:
+    timeout: 2s
+    send_batch_size: 512
+
+  batch/logs:
+    timeout: 500ms
+    send_batch_size: 2048
+
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  # Pipeline-specific processors
+  attributes/metrics:
+    actions:
+      - key: pipeline
+        value: metrics
+        action: insert
+
+  attributes/traces:
+    actions:
+      - key: pipeline
+        value: traces
+        action: insert
+
+  attributes/logs:
+    actions:
+      - key: pipeline
+        value: logs
+        action: insert
+
+exporters:
+  logging:
+    loglevel: debug
+
+  logging/metrics:
+    loglevel: info
+
+  otlp/metrics:
+    endpoint: metrics-backend:4317
+    tls:
+      insecure: true
+
+  otlp/traces:
+    endpoint: traces-backend:4317
+    tls:
+      insecure: true
+
+  otlp/logs:
+    endpoint: logs-backend:4317
+    tls:
+      insecure: true
+
+service:
+  pipelines:
+    # Primary metrics pipeline
+    metrics:
+      receivers: [otlp, prometheus]
+      processors: [memory_limiter, attributes/metrics, batch]
+      exporters: [logging/metrics, otlp/metrics]
+    
+    # Secondary metrics pipeline for internal metrics
+    metrics/internal:
+      receivers: [prometheus]
+      processors: [batch]
+      exporters: [logging]
+    
+    # Traces pipeline with different batching
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, attributes/traces, batch/traces]
+      exporters: [logging, otlp/traces]
+    
+    # Logs pipeline with high throughput config
+    logs:
+      receivers: [otlp, filelog]
+      processors: [memory_limiter, attributes/logs, batch/logs]
+      exporters: [logging, otlp/logs]
+
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888
+
+  extensions: [health_check, zpages]
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+    path: "/health"
+  
+  zpages:
+    endpoint: 0.0.0.0:55679

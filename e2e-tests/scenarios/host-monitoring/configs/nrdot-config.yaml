@@ -1,0 +1,181 @@
+# NRDOT Configuration for Host Monitoring E2E Test
+receivers:
+  hostmetrics:
+    collection_interval: 10s
+    scrapers:
+      cpu:
+        metrics:
+          system.cpu.utilization:
+            enabled: true
+      memory:
+        metrics:
+          system.memory.utilization:
+            enabled: true
+      load:
+        metrics:
+          system.cpu.load_average.1m:
+            enabled: true
+          system.cpu.load_average.5m:
+            enabled: true
+          system.cpu.load_average.15m:
+            enabled: true
+      disk:
+        metrics:
+          system.disk.io:
+            enabled: true
+          system.disk.operations:
+            enabled: true
+          system.disk.io_time:
+            enabled: true
+          system.disk.weighted_io_time:
+            enabled: true
+          system.disk.merged:
+            enabled: true
+          system.disk.pending_operations:
+            enabled: true
+      filesystem:
+        metrics:
+          system.filesystem.usage:
+            enabled: true
+          system.filesystem.inodes.usage:
+            enabled: true
+      network:
+        metrics:
+          system.network.io:
+            enabled: true
+          system.network.packets:
+            enabled: true
+          system.network.errors:
+            enabled: true
+          system.network.dropped:
+            enabled: true
+          system.network.connections:
+            enabled: true
+      processes:
+        metrics:
+          system.processes.running:
+            enabled: true
+          system.processes.blocked:
+            enabled: true
+          system.processes.created:
+            enabled: true
+
+  docker_stats:
+    endpoint: unix:///var/run/docker.sock
+    collection_interval: 10s
+    api_version: 1.41
+    metrics:
+      container.cpu.usage.total:
+        enabled: true
+      container.cpu.throttling_data.throttled_time:
+        enabled: true
+      container.memory.usage:
+        enabled: true
+      container.memory.usage.limit:
+        enabled: true
+      container.memory.percent:
+        enabled: true
+      container.network.io:
+        enabled: true
+      container.blockio.io_service_bytes_recursive:
+        enabled: true
+
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'nrdot'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['localhost:8888']
+
+processors:
+  batch:
+    timeout: 10s
+    send_batch_size: 1024
+
+  attributes:
+    actions:
+      - key: host.name
+        from_attribute: host.hostname
+        action: upsert
+      - key: monitoring.type
+        value: host
+        action: upsert
+
+  resourcedetection:
+    detectors: [system, env, docker]
+    system:
+      hostname_sources: ["os", "dns"]
+    timeout: 2s
+
+  filter/containers:
+    metrics:
+      include:
+        match_type: regexp
+        metric_names:
+          - container.*
+        resource_attributes:
+          - key: container.name
+            value: (nrdot-.*|stress-.*|node-exporter)
+
+  metrics_transform:
+    transforms:
+      # Convert CPU seconds to utilization percentage
+      - metric_name: system.cpu.time
+        action: experimental_calculate_new_metric
+        operations:
+          - action: calculate_utilization
+            output_metric: system.cpu.utilization_percent
+
+      # Calculate memory utilization percentage
+      - metric_name: system.memory.usage
+        action: experimental_calculate_new_metric
+        operations:
+          - action: calculate_percentage
+            output_metric: system.memory.utilization_percent
+
+exporters:
+  prometheus:
+    endpoint: 0.0.0.0:8888
+    namespace: nrdot
+    const_labels:
+      source: nrdot_host
+    resource_to_telemetry_conversion:
+      enabled: true
+
+  debug:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 100
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+    
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+  memory_ballast:
+    size_mib: 256
+
+service:
+  extensions: [health_check, zpages, memory_ballast]
+  
+  pipelines:
+    metrics/host:
+      receivers: [hostmetrics, prometheus]
+      processors: [batch, attributes, resourcedetection, metrics_transform]
+      exporters: [prometheus, debug]
+      
+    metrics/containers:
+      receivers: [docker_stats]
+      processors: [batch, attributes, filter/containers]
+      exporters: [prometheus]
+      
+  telemetry:
+    logs:
+      level: info
+      output_paths: ["stdout"]
+    metrics:
+      address: 0.0.0.0:8889
+      level: detailed

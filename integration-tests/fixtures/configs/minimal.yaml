@@ -1,0 +1,26 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+
+processors:
+  batch:
+
+exporters:
+  logging:
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [logging]
+
+  telemetry:
+    metrics:
+      address: 0.0.0.0:8888
+
+  extensions: [health_check]
+
+extensions:
+  health_check:

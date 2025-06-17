@@ -1,0 +1,29 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  # Increase sample limit for high cardinality
+  sample_limit: 100000
+
+scrape_configs:
+  - job_name: 'nrdot-metrics'
+    static_configs:
+      - targets: ['nrdot:8888']
+        labels:
+          component: 'nrdot'
+    # Increase limits for high cardinality
+    sample_limit: 50000
+    label_limit: 50
+    label_name_length_limit: 200
+    label_value_length_limit: 500
+    
+  - job_name: 'nrdot-internal'
+    static_configs:
+      - targets: ['nrdot:8889']
+        labels:
+          component: 'nrdot-telemetry'
+          
+  - job_name: 'victoriametrics'
+    static_configs:
+      - targets: ['victoriametrics:8428']
+        labels:
+          component: 'victoriametrics'

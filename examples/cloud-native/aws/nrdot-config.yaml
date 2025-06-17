@@ -1,0 +1,267 @@
+# AWS-optimized NRDOT-HOST Configuration
+# Leverages native AWS services for scalability and cost optimization
+
+# Server configuration
+server:
+  host: "0.0.0.0"
+  port: 8080
+  log_level: "${LOG_LEVEL:info}"
+  region: "${AWS_REGION:us-east-1}"
+
+# API configuration with AWS API Gateway integration
+api:
+  enabled: true
+  cors:
+    enabled: true
+    origins: ["https://*.amazonaws.com", "https://*.example.com"]
+  auth:
+    type: "aws_iam"
+    # Uses IAM roles for API authentication
+  rate_limit:
+    enabled: true
+    backend: "dynamodb"
+    table_name: "nrdot-rate-limits"
+
+# Data sources
+sources:
+  - name: "kinesis-stream"
+    type: "kinesis"
+    config:
+      stream_name: "${KINESIS_STREAM_NAME:nrdot-events}"
+      region: "${AWS_REGION:us-east-1}"
+      shard_iterator_type: "TRIM_HORIZON"
+      max_records: 1000
+      poll_interval: "1s"
+      checkpoint:
+        enabled: true
+        table_name: "nrdot-kinesis-checkpoints"
+        
+  - name: "sqs-queue"
+    type: "sqs"
+    config:
+      queue_url: "${SQS_QUEUE_URL}"
+      region: "${AWS_REGION:us-east-1}"
+      max_messages: 10
+      visibility_timeout: 300
+      wait_time_seconds: 20
+      delete_on_success: true
+      
+  - name: "s3-events"
+    type: "s3"
+    config:
+      bucket: "${S3_EVENTS_BUCKET}"
+      prefix: "incoming/"
+      region: "${AWS_REGION:us-east-1}"
+      notification_type: "sqs"
+      queue_url: "${S3_NOTIFICATION_QUEUE_URL}"
+      
+  - name: "eventbridge"
+    type: "eventbridge"
+    config:
+      event_bus: "${EVENT_BUS_NAME:default}"
+      rule_name: "nrdot-events-rule"
+      region: "${AWS_REGION:us-east-1}"
+
+# Processing pipeline
+processors:
+  - name: "rate-limiter"
+    type: "rate_limit"
+    config:
+      backend: "elasticache"
+      endpoint: "${ELASTICACHE_ENDPOINT}"
+      max_events_per_second: 10000
+      
+  - name: "validator"
+    type: "validate"
+    config:
+      schema_store: "s3"
+      bucket: "${SCHEMA_BUCKET:nrdot-schemas}"
+      cache_ttl: "5m"
+      
+  - name: "enricher"
+    type: "enrich"
+    config:
+      enrichments:
+        - source: "dynamodb"
+          table: "nrdot-metadata"
+          key_field: "id"
+          cache_ttl: "60s"
+        - source: "lambda"
+          function_name: "nrdot-enrichment-function"
+          async: true
+        - source: "secrets_manager"
+          secret_id: "nrdot/api-keys"
+          
+  - name: "transformer"
+    type: "transform"
+    config:
+      engine: "lambda"
+      function_name: "nrdot-transform-function"
+      batch_size: 100
+      
+  - name: "ml-inference"
+    type: "sagemaker"
+    config:
+      endpoint_name: "${SAGEMAKER_ENDPOINT:nrdot-anomaly-detector}"
+      content_type: "application/json"
+      batch_size: 50
+
+# Output destinations
+outputs:
+  - name: "kinesis-firehose"
+    type: "kinesis_firehose"
+    config:
+      delivery_stream: "${FIREHOSE_STREAM_NAME:nrdot-output}"
+      region: "${AWS_REGION:us-east-1}"
+      batch_size: 500
+      batch_timeout: "60s"
+      compression: "gzip"
+      
+  - name: "s3-data-lake"
+    type: "s3"
+    config:
+      bucket: "${S3_DATA_LAKE_BUCKET}"
+      prefix: "processed/${date:yyyy/MM/dd/HH}/"
+      region: "${AWS_REGION:us-east-1}"
+      format: "parquet"
+      compression: "snappy"
+      partition_by: ["event_type", "region"]
+      batch_size: 10000
+      batch_timeout: "300s"
+      storage_class: "INTELLIGENT_TIERING"
+      
+  - name: "dynamodb"
+    type: "dynamodb"
+    config:
+      table_name: "nrdot-events"
+      region: "${AWS_REGION:us-east-1}"
+      write_capacity: 1000
+      batch_size: 25
+      retry_limit: 3
+      
+  - name: "elasticsearch"
+    type: "elasticsearch"
+    config:
+      endpoint: "${ELASTICSEARCH_ENDPOINT}"
+      aws_auth: true
+      region: "${AWS_REGION:us-east-1}"
+      index: "nrdot-${date:yyyy.MM.dd}"
+      bulk_size: 5000
+      
+  - name: "cloudwatch"
+    type: "cloudwatch"
+    config:
+      namespace: "NRDOT/Events"
+      region: "${AWS_REGION:us-east-1}"
+      metrics:
+        - name: "EventsProcessed"
+          unit: "Count"
+          dimensions:
+            Environment: "${ENVIRONMENT:production}"
+            Service: "nrdot-host"
+
+# State management
+state:
+  backend: "dynamodb"
+  config:
+    table_name: "nrdot-state"
+    region: "${AWS_REGION:us-east-1}"
+    ttl_attribute: "expiry"
+    consistency: "strong"
+
+# Caching
+cache:
+  backend: "elasticache"
+  config:
+    endpoint: "${ELASTICACHE_ENDPOINT}"
+    engine: "redis"
+    auth_token: "${ELASTICACHE_AUTH_TOKEN}"
+
+# Monitoring and observability
+monitoring:
+  cloudwatch:
+    enabled: true
+    namespace: "NRDOT/Host"
+    metrics_interval: "60s"
+    detailed_metrics: true
+    
+  xray:
+    enabled: true
+    daemon_address: "127.0.0.1:2000"
+    sampling_rate: 0.1
+    
+  logs:
+    driver: "cloudwatch"
+    group: "/aws/ecs/nrdot-host"
+    stream_prefix: "nrdot"
+    retention_days: 30
+
+# Auto-scaling configuration
+autoscaling:
+  enabled: true
+  min_capacity: 2
+  max_capacity: 100
+  target_metrics:
+    - type: "kinesis_iterator_age"
+      target_value: 60000
+    - type: "sqs_queue_depth"
+      target_value: 1000
+    - type: "cpu_utilization"
+      target_value: 70
+
+# Cost optimization
+cost_optimization:
+  spot_instances:
+    enabled: true
+    max_price: "0.05"
+    instance_types: ["t3.medium", "t3.large", "t3a.medium", "t3a.large"]
+    
+  reserved_capacity:
+    dynamodb_write_units: 100
+    dynamodb_read_units: 100
+    kinesis_shards: 10
+    
+  lifecycle_policies:
+    s3_transition_days: 30
+    s3_glacier_days: 90
+    cloudwatch_logs_retention: 30
+
+# Security
+security:
+  encryption:
+    at_rest:
+      enabled: true
+      kms_key_id: "${KMS_KEY_ID}"
+    in_transit:
+      enabled: true
+      tls_version: "1.2"
+      
+  iam_role: "${ECS_TASK_ROLE_ARN}"
+  
+  secrets:
+    backend: "secrets_manager"
+    prefix: "nrdot/"
+    
+  network:
+    vpc_endpoints:
+      - "s3"
+      - "dynamodb"
+      - "kinesis"
+      - "sqs"
+      - "secretsmanager"
+
+# Disaster recovery
+disaster_recovery:
+  backup:
+    enabled: true
+    schedule: "0 2 * * *"
+    retention_days: 30
+    destinations:
+      - type: "s3"
+        bucket: "${BACKUP_BUCKET}"
+        region: "${BACKUP_REGION:us-west-2}"
+        
+  multi_region:
+    enabled: true
+    regions: ["us-east-1", "us-west-2"]
+    failover_mode: "active-passive"

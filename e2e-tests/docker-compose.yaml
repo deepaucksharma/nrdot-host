@@ -1,0 +1,101 @@
+version: '3.8'
+
+services:
+  # NRDOT-HOST
+  nrdot:
+    image: nrdot/nrdot-host:latest
+    container_name: nrdot-host
+    environment:
+      - NRDOT_CONFIG=/etc/nrdot/config.yaml
+      - NRDOT_LOG_LEVEL=info
+    volumes:
+      - ./configs/nrdot-config.yaml:/etc/nrdot/config.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+    ports:
+      - "8080:8080"  # HTTP metrics endpoint
+      - "4317:4317"  # OTLP gRPC
+      - "4318:4318"  # OTLP HTTP
+      - "6060:6060"  # pprof endpoint
+    networks:
+      - e2e-network
+    restart: unless-stopped
+
+  # Prometheus for metrics storage
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: e2e-prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-remote-write-receiver'
+    volumes:
+      - ./configs/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - e2e-network
+    restart: unless-stopped
+
+  # Jaeger for trace storage
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: e2e-jaeger
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "14268:14268"  # Jaeger collector HTTP
+      - "14250:14250"  # Jaeger collector gRPC
+    networks:
+      - e2e-network
+    restart: unless-stopped
+
+  # Grafana for visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: e2e-grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./configs/grafana/datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml:ro
+      - ./configs/grafana/dashboards.yaml:/etc/grafana/provisioning/dashboards/dashboards.yaml:ro
+      - ./configs/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    networks:
+      - e2e-network
+    restart: unless-stopped
+
+  # Redis for caching and state
+  redis:
+    image: redis:alpine
+    container_name: e2e-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - e2e-network
+    restart: unless-stopped
+
+  # Test result collector
+  test-collector:
+    image: alpine:latest
+    container_name: e2e-test-collector
+    volumes:
+      - ./results:/results
+      - ./scripts:/scripts:ro
+    networks:
+      - e2e-network
+    command: tail -f /dev/null
+
+networks:
+  e2e-network:
+    driver: bridge
+
+volumes:
+  prometheus-data:
+  grafana-data:

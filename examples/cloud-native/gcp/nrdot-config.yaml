@@ -1,0 +1,343 @@
+# GCP-optimized NRDOT-HOST Configuration
+# Leverages Google Cloud Platform services for scalability and integration
+
+# Server configuration
+server:
+  host: "0.0.0.0"
+  port: 8080
+  log_level: "${LOG_LEVEL:info}"
+  project_id: "${GCP_PROJECT_ID}"
+  region: "${GCP_REGION:us-central1}"
+
+# API configuration with Cloud Endpoints integration
+api:
+  enabled: true
+  cors:
+    enabled: true
+    origins: ["https://*.googleapis.com", "https://*.example.com"]
+  auth:
+    type: "gcp_identity"
+    # Uses Google Identity Platform
+    identity_platform:
+      api_key: "${GCP_API_KEY}"
+      authorized_domains: ["example.com"]
+  rate_limit:
+    enabled: true
+    backend: "firestore"
+    collection: "rate_limits"
+
+# GCP-native data sources
+sources:
+  - name: "pubsub-subscription"
+    type: "pubsub"
+    config:
+      project_id: "${GCP_PROJECT_ID}"
+      subscription: "nrdot-events-sub"
+      max_messages: 1000
+      max_extension: "600s"
+      ack_deadline: "60s"
+      ordering_key: "tenant_id"
+      flow_control:
+        max_messages: 10000
+        max_bytes: "1GB"
+        
+  - name: "cloud-storage-events"
+    type: "gcs"
+    config:
+      bucket: "${GCS_EVENTS_BUCKET}"
+      prefix: "incoming/"
+      notifications:
+        enabled: true
+        topic: "gcs-events-topic"
+      process_existing: false
+      
+  - name: "bigtable-stream"
+    type: "bigtable"
+    config:
+      project_id: "${GCP_PROJECT_ID}"
+      instance: "nrdot-instance"
+      table: "events"
+      app_profile: "default"
+      read_rows:
+        row_set:
+          row_ranges:
+            - start_key: "event#"
+        filter:
+          chain:
+            - family_regex: "data"
+            - timestamp_range:
+                start: "-1h"
+                
+  - name: "firestore-changes"
+    type: "firestore"
+    config:
+      project_id: "${GCP_PROJECT_ID}"
+      database: "(default)"
+      collection: "events"
+      listen:
+        snapshots: true
+        include_metadata: true
+
+# Processing pipeline with GCP services
+processors:
+  - name: "cloud-functions"
+    type: "cloud_function"
+    config:
+      function_url: "${CLOUD_FUNCTION_URL}"
+      max_instances: 100
+      timeout: "60s"
+      retry:
+        attempts: 3
+        backoff: "exponential"
+        
+  - name: "dataflow-transform"
+    type: "dataflow"
+    config:
+      template: "gs://nrdot-templates/transform-v1"
+      parameters:
+        input_topic: "projects/${GCP_PROJECT_ID}/topics/input"
+        output_topic: "projects/${GCP_PROJECT_ID}/topics/output"
+      machine_type: "n1-standard-4"
+      max_workers: 10
+      
+  - name: "ml-engine"
+    type: "vertex_ai"
+    config:
+      endpoint_id: "${VERTEX_AI_ENDPOINT}"
+      project_id: "${GCP_PROJECT_ID}"
+      location: "${GCP_REGION}"
+      model_name: "nrdot-classifier"
+      
+  - name: "dlp-scanner"
+    type: "cloud_dlp"
+    config:
+      project_id: "${GCP_PROJECT_ID}"
+      inspect_templates:
+        - "projects/${GCP_PROJECT_ID}/inspectTemplates/pii-detector"
+      deidentify_templates:
+        - "projects/${GCP_PROJECT_ID}/deidentifyTemplates/pii-masking"
+      info_types:
+        - "EMAIL_ADDRESS"
+        - "PHONE_NUMBER"
+        - "CREDIT_CARD_NUMBER"
+        - "US_SOCIAL_SECURITY_NUMBER"
+
+# GCP storage outputs
+outputs:
+  - name: "bigquery"
+    type: "bigquery"
+    config:
+      project_id: "${GCP_PROJECT_ID}"
+      dataset: "nrdot_events"
+      table: "events_${date:yyyyMMdd}"
+      location: "${GCP_REGION}"
+      write_disposition: "WRITE_APPEND"
+      create_disposition: "CREATE_IF_NEEDED"
+      schema:
+        auto_detect: true
+        evolution: true
+      clustering_fields: ["event_type", "tenant_id"]
+      time_partitioning:
+        type: "DAY"
+        field: "timestamp"
+        expiration_days: 365
+      streaming:
+        enabled: true
+        insert_id_field: "event_id"
+        
+  - name: "cloud-storage"
+    type: "gcs"
+    config:
+      bucket: "${GCS_DATA_LAKE_BUCKET}"
+      prefix: "processed/${date:yyyy/MM/dd/HH}/"
+      format: "avro"
+      compression: "snappy"
+      batch_size: 10000
+      batch_timeout: "300s"
+      storage_class: "STANDARD"
+      lifecycle:
+        - action: "SetStorageClass"
+          storage_class: "NEARLINE"
+          age_days: 30
+        - action: "SetStorageClass"
+          storage_class: "COLDLINE"
+          age_days: 90
+        - action: "Delete"
+          age_days: 365
+          
+  - name: "bigtable"
+    type: "bigtable"
+    config:
+      project_id: "${GCP_PROJECT_ID}"
+      instance: "nrdot-instance"
+      table: "events"
+      column_families:
+        - name: "data"
+          gc_rule:
+            max_versions: 3
+            max_age: "30d"
+        - name: "metadata"
+          gc_rule:
+            max_versions: 1
+      app_profile: "batch-write"
+      
+  - name: "firestore"
+    type: "firestore"
+    config:
+      project_id: "${GCP_PROJECT_ID}"
+      database: "(default)"
+      collection: "processed_events"
+      batch_size: 500
+      ordered_writes: true
+      merge_fields: true
+      
+  - name: "cloud-monitoring"
+    type: "stackdriver"
+    config:
+      project_id: "${GCP_PROJECT_ID}"
+      metric_prefix: "custom.googleapis.com/nrdot/"
+      resource_type: "generic_task"
+      resource_labels:
+        project_id: "${GCP_PROJECT_ID}"
+        location: "${GCP_REGION}"
+        namespace: "nrdot"
+        job: "host"
+
+# State management using GCP services
+state:
+  backend: "firestore"
+  config:
+    project_id: "${GCP_PROJECT_ID}"
+    collection: "nrdot_state"
+    consistency: "strong"
+    cache:
+      enabled: true
+      ttl: "5m"
+
+# Caching with Memorystore
+cache:
+  backend: "memorystore"
+  config:
+    instance: "projects/${GCP_PROJECT_ID}/locations/${GCP_REGION}/instances/nrdot-cache"
+    pool_size: 10
+    ttl: "1h"
+
+# GCP-specific monitoring
+monitoring:
+  cloud_monitoring:
+    enabled: true
+    project_id: "${GCP_PROJECT_ID}"
+    export_interval: "60s"
+    
+  cloud_trace:
+    enabled: true
+    project_id: "${GCP_PROJECT_ID}"
+    sampling_rate: 0.1
+    
+  cloud_profiler:
+    enabled: true
+    project_id: "${GCP_PROJECT_ID}"
+    service: "nrdot-host"
+    service_version: "${VERSION}"
+    
+  cloud_logging:
+    enabled: true
+    log_name: "nrdot-host"
+    severity_filter: "INFO"
+    labels:
+      environment: "${ENVIRONMENT}"
+      version: "${VERSION}"
+
+# Auto-scaling configuration
+autoscaling:
+  enabled: true
+  min_instances: 2
+  max_instances: 100
+  target_metrics:
+    - type: "pubsub_subscription_backlog"
+      target_value: 1000
+    - type: "cpu_utilization"
+      target_value: 0.7
+    - type: "custom_metric"
+      name: "custom.googleapis.com/nrdot/queue_depth"
+      target_value: 5000
+
+# GCP security features
+security:
+  encryption:
+    at_rest:
+      enabled: true
+      cmek:
+        key_name: "projects/${GCP_PROJECT_ID}/locations/${GCP_REGION}/keyRings/nrdot/cryptoKeys/data-key"
+    in_transit:
+      enabled: true
+      mtls: true
+      
+  identity:
+    service_account: "${SERVICE_ACCOUNT_EMAIL}"
+    workload_identity:
+      enabled: true
+      kubernetes_namespace: "nrdot"
+      kubernetes_service_account: "nrdot-host"
+      
+  secrets:
+    backend: "secret_manager"
+    project_id: "${GCP_PROJECT_ID}"
+    version_aliases:
+      latest: true
+      
+  vpc_sc:
+    enabled: true
+    perimeter: "nrdot-perimeter"
+    access_levels:
+      - "nrdot-internal"
+      - "nrdot-partners"
+
+# Cost optimization
+cost_optimization:
+  preemptible_instances:
+    enabled: true
+    percentage: 50
+    
+  committed_use:
+    cpu_cores: 100
+    memory_gb: 400
+    
+  rightsizing:
+    enabled: true
+    recommendations: true
+    auto_apply: false
+    
+  lifecycle_policies:
+    storage_transition_days: 30
+    archive_days: 90
+    delete_days: 365
+
+# Multi-region configuration
+multi_region:
+  enabled: true
+  primary: "us-central1"
+  replicas:
+    - region: "europe-west1"
+      read_only: false
+    - region: "asia-northeast1"
+      read_only: true
+  failover:
+    automatic: true
+    health_check_interval: "30s"
+    
+# Disaster recovery
+disaster_recovery:
+  backup:
+    enabled: true
+    schedule: "0 2 * * *"
+    location: "us"
+    retention_days: 30
+    
+  export:
+    bigquery_dataset: "nrdot_backup"
+    gcs_bucket: "nrdot-backup-${GCP_PROJECT_ID}"
+    
+  restore:
+    point_in_time: true
+    max_restore_age: "7d"

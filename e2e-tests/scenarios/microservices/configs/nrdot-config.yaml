@@ -1,0 +1,70 @@
+# NRDOT Configuration for Microservices E2E Test
+service:
+  name: nrdot-microservices-test
+  environment: e2e-test
+
+# Enable all telemetry types
+metrics:
+  enabled: true
+  interval: 10s
+
+traces:
+  enabled: true
+  sample_rate: 1.0
+
+logs:
+  enabled: true
+  level: info
+
+# Security settings - test secret redaction
+security:
+  redact_secrets: true
+  redact_patterns:
+    - "sk-[a-zA-Z0-9]+"
+    - "password=[^\\s]+"
+  
+# Processing configuration
+processing:
+  # Test enrichment
+  enrich:
+    enabled: true
+    add_host_metadata: true
+    add_container_metadata: true
+    static_attributes:
+      test.scenario: microservices
+      test.type: e2e
+  
+  # Test transformation
+  transform:
+    enabled: true
+    metric_transforms:
+      - type: aggregate
+        metric_name: "http.request.duration"
+        aggregation: "avg"
+        group_by: ["service", "endpoint"]
+        output_metric: "http.request.duration.avg"
+  
+  # Test cardinality protection
+  cardinality:
+    enabled: true
+    global_limit: 10000
+    metric_limits:
+      http.request.count: 1000
+    strategy: aggregate
+
+# Export configuration
+export:
+  # Send to Prometheus
+  prometheus:
+    enabled: true
+    endpoint: "0.0.0.0:8888"
+  
+  # Send to Jaeger
+  jaeger:
+    enabled: true
+    endpoint: "jaeger:14268"
+  
+  # Debug logging
+  logging:
+    enabled: true
+    level: debug

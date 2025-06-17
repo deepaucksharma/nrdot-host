@@ -1,0 +1,29 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    install|upgrade)
+        # Create nrdot user and group
+        if ! getent group nrdot >/dev/null; then
+            addgroup --system nrdot
+        fi
+        
+        if ! getent passwd nrdot >/dev/null; then
+            adduser --system --ingroup nrdot --home /var/lib/nrdot \
+                    --no-create-home --disabled-password \
+                    --gecos "NRDOT Service Account" nrdot
+        fi
+        ;;
+    
+    abort-upgrade)
+        ;;
+    
+    *)
+        echo "preinst called with unknown argument \`$1'" >&2
+        exit 1
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

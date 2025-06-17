@@ -1,0 +1,102 @@
+# NRDOT-HOST Base Image
+# Provides common dependencies and security hardening for all components
+
+FROM alpine:3.19 AS base
+
+# Install common dependencies
+RUN apk add --no-cache \
+    ca-certificates \
+    tzdata \
+    tini \
+    curl \
+    && rm -rf /var/cache/apk/*
+
+# Create non-root user and group
+RUN addgroup -g 10001 -S nrdot && \
+    adduser -u 10001 -S nrdot -G nrdot
+
+# Create common directories
+RUN mkdir -p /etc/nrdot /var/lib/nrdot /var/log/nrdot /tmp/nrdot && \
+    chown -R nrdot:nrdot /etc/nrdot /var/lib/nrdot /var/log/nrdot /tmp/nrdot
+
+# Security hardening
+RUN chmod 755 /etc/nrdot /var/lib/nrdot /var/log/nrdot && \
+    chmod 1777 /tmp/nrdot
+
+# Set up locale
+ENV LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
+
+# Common environment variables
+ENV NRDOT_HOME=/var/lib/nrdot \
+    NRDOT_CONFIG_DIR=/etc/nrdot \
+    NRDOT_LOG_DIR=/var/log/nrdot \
+    NRDOT_TEMP_DIR=/tmp/nrdot \
+    NRDOT_USER=nrdot
+
+# Health check script
+COPY <<'EOF' /usr/local/bin/healthcheck
+#!/bin/sh
+# Default health check - can be overridden
+exit 0
+EOF
+RUN chmod +x /usr/local/bin/healthcheck
+
+# Signal handling setup
+COPY <<'EOF' /usr/local/bin/signal-handler
+#!/bin/sh
+# Trap signals and forward to process
+_term() {
+  echo "Caught SIGTERM signal!"
+  kill -TERM "$child" 2>/dev/null
+}
+
+trap _term SIGTERM
+
+# Run the main process
+"$@" &
+
+child=$!
+wait "$child"
+EOF
+RUN chmod +x /usr/local/bin/signal-handler
+
+# Default working directory
+WORKDIR /var/lib/nrdot
+
+# Use tini for proper signal handling
+ENTRYPOINT ["/sbin/tini", "--"]
+
+# Switch to non-root user by default
+USER nrdot
+
+# Labels
+LABEL maintainer="New Relic NRDOT Team <nrdot@newrelic.com>" \
+      org.opencontainers.image.vendor="New Relic" \
+      org.opencontainers.image.title="NRDOT Base Image" \
+      org.opencontainers.image.description="Base image for NRDOT-HOST components" \
+      org.opencontainers.image.version="1.0.0" \
+      org.opencontainers.image.source="https://github.com/newrelic/nrdot-host"
+
+# Golang builder base
+FROM golang:1.21-alpine AS golang-base
+
+# Install build dependencies
+RUN apk add --no-cache \
+    make \
+    git \
+    gcc \
+    musl-dev \
+    linux-headers
+
+# Set up Go environment
+ENV CGO_ENABLED=0 \
+    GOOS=linux \
+    GOARCH=amd64 \
+    GO111MODULE=on
+
+# Create build user
+RUN adduser -D -u 1000 builder
+USER builder
+
+WORKDIR /build

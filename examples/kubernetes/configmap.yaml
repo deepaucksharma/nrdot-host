@@ -1,0 +1,149 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nrdot-config
+  namespace: nrdot-system
+  labels:
+    app: nrdot-host
+data:
+  config.yaml: |
+    # Include the full configuration from nrdot-config.yaml
+    # This is managed separately for easier updates
+    # kubectl create configmap nrdot-config --from-file=nrdot-config.yaml -n nrdot-system
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nrdot-env-config
+  namespace: nrdot-system
+  labels:
+    app: nrdot-host
+data:
+  # Environment-specific configurations
+  ENVIRONMENT: "production"
+  DATACENTER: "us-east-1"
+  SERVICE_DISCOVERY: "kubernetes"
+  
+  # Kafka configuration
+  KAFKA_BROKERS: "kafka-0.kafka-headless:9092,kafka-1.kafka-headless:9092,kafka-2.kafka-headless:9092"
+  KAFKA_SECURITY_PROTOCOL: "SASL_SSL"
+  KAFKA_SASL_MECHANISM: "PLAIN"
+  
+  # Elasticsearch configuration
+  ELASTICSEARCH_HOSTS: "http://elasticsearch-master:9200"
+  ELASTICSEARCH_INDEX_PREFIX: "nrdot"
+  
+  # Redis configuration
+  REDIS_ADDR: "redis-service:6379"
+  REDIS_DB: "0"
+  
+  # Monitoring configuration
+  PROMETHEUS_PUSHGATEWAY: "http://prometheus-pushgateway:9091"
+  JAEGER_ENDPOINT: "http://jaeger-collector:14268/api/traces"
+  
+  # Feature flags
+  FEATURE_DEDUPLICATION: "true"
+  FEATURE_RATE_LIMITING: "true"
+  FEATURE_CIRCUIT_BREAKER: "true"
+  FEATURE_DISTRIBUTED_TRACING: "true"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: nrdot-secrets
+  namespace: nrdot-system
+  labels:
+    app: nrdot-host
+type: Opaque
+stringData:
+  # Database credentials
+  DB_USERNAME: "nrdot_user"
+  DB_PASSWORD: "changeme"
+  
+  # Kafka credentials
+  KAFKA_USERNAME: "nrdot"
+  KAFKA_PASSWORD: "changeme"
+  
+  # AWS credentials (consider using IRSA instead)
+  AWS_ACCESS_KEY_ID: "your-access-key"
+  AWS_SECRET_ACCESS_KEY: "your-secret-key"
+  
+  # API keys
+  METADATA_SERVICE_API_KEY: "your-api-key"
+  WEBHOOK_SECRET: "your-webhook-secret"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: redis-secret
+  namespace: nrdot-system
+  labels:
+    app: nrdot-host
+type: Opaque
+stringData:
+  password: "redis-password-changeme"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nrdot-scripts
+  namespace: nrdot-system
+  labels:
+    app: nrdot-host
+data:
+  healthcheck.sh: |
+    #!/bin/sh
+    set -e
+    
+    # Check API health
+    curl -sf http://localhost:8081/health/live || exit 1
+    
+    # Check metrics endpoint
+    curl -sf http://localhost:9090/metrics > /dev/null || exit 1
+    
+    # Check processing lag (custom check)
+    LAG=$(curl -sf http://localhost:8081/health/ready | jq -r '.checks.processing_lag.value')
+    if [ "$LAG" -gt "1000" ]; then
+      echo "Processing lag too high: $LAG"
+      exit 1
+    fi
+    
+    echo "Health check passed"
+    
+  init-config.sh: |
+    #!/bin/sh
+    set -e
+    
+    echo "Initializing NRDOT configuration..."
+    
+    # Wait for dependencies
+    until nc -z redis-service 6379; do
+      echo "Waiting for Redis..."
+      sleep 2
+    done
+    
+    until nc -z elasticsearch-master 9200; do
+      echo "Waiting for Elasticsearch..."
+      sleep 2
+    done
+    
+    echo "All dependencies are ready"
+    
+  backup.sh: |
+    #!/bin/sh
+    set -e
+    
+    BACKUP_DIR="/backup/$(date +%Y%m%d_%H%M%S)"
+    mkdir -p "$BACKUP_DIR"
+    
+    # Backup configuration
+    cp /etc/nrdot/config.yaml "$BACKUP_DIR/"
+    
+    # Export metrics snapshot
+    curl -s http://localhost:9090/metrics > "$BACKUP_DIR/metrics.txt"
+    
+    # Compress backup
+    tar -czf "$BACKUP_DIR.tar.gz" -C /backup "$(basename $BACKUP_DIR)"
+    rm -rf "$BACKUP_DIR"
+    
+    echo "Backup completed: $BACKUP_DIR.tar.gz"

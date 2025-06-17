@@ -1,0 +1,266 @@
+version: '3.8'
+
+# Development Docker Compose Stack
+# Includes all NRDOT components plus supporting services
+
+networks:
+  nrdot-dev:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+volumes:
+  prometheus-data:
+  grafana-data:
+  jaeger-data:
+  tempo-data:
+  nrdot-config:
+  nrdot-data:
+  nrdot-logs:
+
+services:
+  # NRDOT Core Components
+  
+  config-engine:
+    build:
+      context: ..
+      dockerfile: docker/config-engine/Dockerfile
+      args:
+        BASE_IMAGE: nrdot-base:latest
+    image: nrdot-config-engine:dev
+    container_name: nrdot-config-engine
+    networks:
+      - nrdot-dev
+    volumes:
+      - nrdot-config:/etc/nrdot
+      - ./configs:/etc/nrdot/source:ro
+      - nrdot-data:/var/lib/nrdot
+    environment:
+      - NRDOT_CONFIG_ENGINE_MODE=watch
+      - NRDOT_CONFIG_PATH=/etc/nrdot/source/nrdot-config.yaml
+      - NRDOT_WATCH_INTERVAL=10s
+      - NRDOT_DEBUG=true
+      - NRDOT_LOG_LEVEL=debug
+    depends_on:
+      - base
+    restart: unless-stopped
+
+  privileged-helper:
+    build:
+      context: ..
+      dockerfile: docker/privileged-helper/Dockerfile
+    image: nrdot-privileged-helper:dev
+    container_name: nrdot-privileged-helper
+    networks:
+      - nrdot-dev
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - type: tmpfs
+        target: /var/run/nrdot
+    environment:
+      - NRDOT_PRIVILEGED_ALLOWED_UIDS=10001,1000
+      - NRDOT_DEBUG=true
+      - NRDOT_LOG_LEVEL=debug
+    cap_add:
+      - SYS_PTRACE
+      - DAC_READ_SEARCH
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+    pid: host
+    restart: unless-stopped
+
+  supervisor:
+    build:
+      context: ..
+      dockerfile: docker/supervisor/Dockerfile
+      args:
+        BASE_IMAGE: nrdot-base:latest
+    image: nrdot-supervisor:dev
+    container_name: nrdot-supervisor
+    networks:
+      - nrdot-dev
+    volumes:
+      - nrdot-config:/etc/nrdot:ro
+      - nrdot-data:/var/lib/nrdot
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - NRDOT_SUPERVISOR_CONFIG=/etc/nrdot/supervisor.yaml
+      - NRDOT_RESTART_STRATEGY=exponential
+      - NRDOT_MAX_RESTARTS=3
+      - NRDOT_DEBUG=true
+      - NRDOT_LOG_LEVEL=debug
+    depends_on:
+      - base
+      - config-engine
+      - privileged-helper
+    restart: unless-stopped
+
+  collector:
+    build:
+      context: ../otelcol-builder
+      dockerfile: ../docker/collector/Dockerfile
+      args:
+        BASE_IMAGE: nrdot-base:latest
+    image: nrdot-collector:dev
+    container_name: nrdot-collector
+    networks:
+      - nrdot-dev
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "8888:8888"   # Prometheus metrics
+      - "13133:13133" # Health check
+      - "55679:55679" # zPages
+    volumes:
+      - nrdot-config:/etc/otel:ro
+      - nrdot-data:/var/lib/otel
+    environment:
+      - NRDOT_COLLECTOR_CONFIG=/etc/otel/otelcol-config.yaml
+      - OTEL_RESOURCE_ATTRIBUTES=service.name=nrdot-collector,deployment.environment=dev
+      - NRDOT_DEBUG=true
+      - OTEL_LOG_LEVEL=debug
+      - NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY}
+    depends_on:
+      - base
+      - config-engine
+      - privileged-helper
+    restart: unless-stopped
+
+  api-server:
+    build:
+      context: ..
+      dockerfile: docker/api-server/Dockerfile
+      args:
+        BASE_IMAGE: nrdot-base:latest
+    image: nrdot-api-server:dev
+    container_name: nrdot-api-server
+    networks:
+      - nrdot-dev
+    ports:
+      - "8080:8080"
+    volumes:
+      - nrdot-config:/etc/nrdot:ro
+      - nrdot-data:/var/lib/nrdot:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - NRDOT_API_PORT=8080
+      - NRDOT_API_CORS_ENABLED=true
+      - NRDOT_API_METRICS_ENABLED=true
+      - NRDOT_SUPERVISOR_SOCKET=/var/run/nrdot/supervisor.sock
+      - NRDOT_CONFIG_ENGINE_URL=http://config-engine:8081
+      - NRDOT_DEBUG=true
+      - NRDOT_LOG_LEVEL=debug
+    depends_on:
+      - base
+      - supervisor
+      - collector
+    restart: unless-stopped
+
+  # Supporting Services
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: nrdot-prometheus
+    networks:
+      - nrdot-dev
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./configs/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: nrdot-grafana
+    networks:
+      - nrdot-dev
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./configs/grafana/provisioning:/etc/grafana/provisioning:ro
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: nrdot-jaeger
+    networks:
+      - nrdot-dev
+    ports:
+      - "5775:5775/udp"
+      - "6831:6831/udp"
+      - "6832:6832/udp"
+      - "5778:5778"
+      - "16686:16686"
+      - "14268:14268"
+      - "14250:14250"
+      - "9411:9411"
+    environment:
+      - COLLECTOR_ZIPKIN_HOST_PORT=:9411
+      - COLLECTOR_OTLP_ENABLED=true
+    volumes:
+      - jaeger-data:/tmp
+    restart: unless-stopped
+
+  tempo:
+    image: grafana/tempo:latest
+    container_name: nrdot-tempo
+    networks:
+      - nrdot-dev
+    ports:
+      - "3200:3200"   # tempo
+      - "4319:4317"   # otlp grpc
+      - "4320:4318"   # otlp http
+    volumes:
+      - ./configs/tempo.yaml:/etc/tempo.yaml:ro
+      - tempo-data:/tmp/tempo
+    command: 
+      - -config.file=/etc/tempo.yaml
+    restart: unless-stopped
+
+  # Base image builder (one-time build)
+  base:
+    build:
+      context: ..
+      dockerfile: docker/base/Dockerfile.base
+      target: base
+    image: nrdot-base:latest
+    container_name: nrdot-base-builder
+    command: /bin/true
+
+  # CLI tool for testing
+  ctl:
+    build:
+      context: ..
+      dockerfile: docker/ctl/Dockerfile
+      args:
+        BASE_IMAGE: nrdot-base:latest
+    image: nrdot-ctl:dev
+    container_name: nrdot-ctl
+    networks:
+      - nrdot-dev
+    volumes:
+      - nrdot-config:/etc/nrdot
+      - ./ctl-config:/home/nrdot/.nrdot
+    environment:
+      - NRDOT_API_URL=http://api-server:8080
+      - NRDOT_CTL_OUTPUT_FORMAT=table
+    depends_on:
+      - api-server
+    profiles:
+      - tools

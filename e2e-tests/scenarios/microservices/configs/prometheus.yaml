@@ -1,0 +1,22 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'nrdot'
+    static_configs:
+      - targets: ['nrdot:8888']
+        labels:
+          component: 'nrdot'
+
+  - job_name: 'frontend'
+    static_configs:
+      - targets: ['frontend:8080']
+        labels:
+          service: 'frontend'
+
+  - job_name: 'backend'
+    static_configs:
+      - targets: ['backend:8081']
+        labels:
+          service: 'backend'

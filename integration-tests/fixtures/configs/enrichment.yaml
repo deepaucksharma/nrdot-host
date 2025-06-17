@@ -1,0 +1,132 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  # Host metadata enrichment
+  resourcedetection:
+    detectors: [system, env, docker]
+    system:
+      hostname_sources: ["os"]
+    timeout: 2s
+
+  # Add custom attributes
+  attributes/custom:
+    actions:
+      - key: environment
+        value: test
+        action: insert
+      - key: region
+        value: us-east-1
+        action: insert
+      - key: deployment.type
+        value: integration-test
+        action: insert
+      - key: team
+        value: platform
+        action: insert
+
+  # Conditional enrichment based on service name
+  attributes/frontend:
+    include:
+      match_type: regexp
+      services: ["frontend.*"]
+    actions:
+      - key: tier
+        value: web
+        action: insert
+
+  attributes/backend:
+    include:
+      match_type: regexp
+      services: ["backend.*"]
+    actions:
+      - key: tier
+        value: api
+        action: insert
+
+  # Container metadata enrichment (if running in container)
+  k8sattributes:
+    auth_type: "serviceAccount"
+    passthrough: false
+    extract:
+      metadata:
+        - k8s.pod.name
+        - k8s.pod.uid
+        - k8s.deployment.name
+        - k8s.namespace.name
+        - k8s.node.name
+      labels:
+        - tag_name: app
+          key: app
+        - tag_name: component
+          key: component
+
+exporters:
+  logging:
+    loglevel: debug
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+  otlp:
+    endpoint: mock-backend:4317
+    tls:
+      insecure: true
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: 
+        - memory_limiter
+        - resourcedetection
+        - attributes/custom
+        - attributes/frontend
+        - attributes/backend
+        - batch
+      exporters: [logging, otlp]
+    
+    traces:
+      receivers: [otlp]
+      processors: 
+        - memory_limiter
+        - resourcedetection
+        - attributes/custom
+        - batch
+      exporters: [logging, otlp]
+    
+    logs:
+      receivers: [otlp]
+      processors: 
+        - memory_limiter
+        - resourcedetection
+        - attributes/custom
+        - batch
+      exporters: [logging, otlp]
+
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888
+
+  extensions: [health_check]
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+    path: "/health"

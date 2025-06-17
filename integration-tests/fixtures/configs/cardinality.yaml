@@ -1,0 +1,137 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  # Cardinality limiting processor
+  # This is a hypothetical processor - actual implementation may vary
+  cardinality_limiter:
+    # Global cardinality limit
+    max_cardinality: 10000
+    
+    # Per-metric limits
+    metric_limits:
+      - metric_name: "high_cardinality_metric_*"
+        max_cardinality: 1000
+      - metric_name: ".*_histogram"
+        max_cardinality: 5000
+    
+    # Label-level limits
+    label_limits:
+      - label_name: "user_id"
+        max_values: 100
+      - label_name: "session_id"
+        max_values: 500
+    
+    # Eviction strategy
+    eviction_strategy: lru  # least recently used
+    
+    # Priority rules
+    priority_rules:
+      - match:
+          resource_attributes:
+            - key: priority
+              value: high
+        priority: 100
+      - match:
+          resource_attributes:
+            - key: tier
+              value: production
+        priority: 90
+      - match:
+          resource_attributes:
+            - key: tier
+              value: development
+        priority: 10
+
+  # Remove high cardinality labels
+  attributes/remove_high_cardinality:
+    actions:
+      - key: request_id
+        action: delete
+      - key: trace_id
+        action: delete
+      - key: span_id
+        action: delete
+      - key: user_session_id
+        action: delete
+
+  # Aggregate metrics to reduce cardinality
+  groupbyattrs:
+    keys:
+      - service.name
+      - host.name
+      - http.method
+      - http.status_code
+      - environment
+
+exporters:
+  logging:
+    loglevel: info
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+  otlp:
+    endpoint: mock-backend:4317
+    tls:
+      insecure: true
+
+  # Prometheus exporter for monitoring cardinality
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    namespace: cardinality_test
+    const_labels:
+      test: cardinality
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: 
+        - memory_limiter
+        - attributes/remove_high_cardinality
+        - groupbyattrs
+        - cardinality_limiter
+        - batch
+      exporters: [logging, otlp, prometheus]
+    
+    traces:
+      receivers: [otlp]
+      processors: 
+        - memory_limiter
+        - batch
+      exporters: [logging, otlp]
+    
+    logs:
+      receivers: [otlp]
+      processors: 
+        - memory_limiter
+        - batch
+      exporters: [logging, otlp]
+
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888
+
+  extensions: [health_check]
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+    path: "/health"

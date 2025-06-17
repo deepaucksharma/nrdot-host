@@ -1,0 +1,378 @@
+# Azure-optimized NRDOT-HOST Configuration
+# Leverages Azure services for enterprise-grade deployments
+
+# Server configuration
+server:
+  host: "0.0.0.0"
+  port: 8080
+  log_level: "${LOG_LEVEL:info}"
+  azure_region: "${AZURE_REGION:eastus}"
+  subscription_id: "${AZURE_SUBSCRIPTION_ID}"
+  resource_group: "${AZURE_RESOURCE_GROUP}"
+
+# API configuration with Azure API Management
+api:
+  enabled: true
+  cors:
+    enabled: true
+    origins: ["https://*.azure.com", "https://*.example.com"]
+  auth:
+    type: "azure_ad"
+    azure_ad:
+      tenant_id: "${AZURE_TENANT_ID}"
+      client_id: "${AZURE_CLIENT_ID}"
+      audience: "api://nrdot-host"
+      issuer: "https://sts.windows.net/${AZURE_TENANT_ID}/"
+      validate_issuer: true
+  rate_limit:
+    enabled: true
+    backend: "cosmos_db"
+    container: "rate_limits"
+    partition_key: "/userId"
+
+# Azure-native data sources
+sources:
+  - name: "event-hubs"
+    type: "event_hub"
+    config:
+      namespace: "${EVENT_HUB_NAMESPACE}"
+      hub_name: "nrdot-events"
+      consumer_group: "$Default"
+      connection_string: "${EVENT_HUB_CONNECTION_STRING}"
+      checkpoint_store:
+        account: "${STORAGE_ACCOUNT_NAME}"
+        container: "checkpoints"
+      batch:
+        max_size: 1000
+        max_wait_time: "10s"
+      features:
+        track_last_enqueued: true
+        
+  - name: "service-bus"
+    type: "service_bus"
+    config:
+      namespace: "${SERVICE_BUS_NAMESPACE}"
+      queue: "nrdot-events"
+      connection_string: "${SERVICE_BUS_CONNECTION_STRING}"
+      receive_mode: "peek_lock"
+      max_concurrent: 10
+      auto_complete: false
+      dead_letter:
+        max_delivery_count: 3
+        
+  - name: "blob-events"
+    type: "blob_storage"
+    config:
+      account: "${STORAGE_ACCOUNT_NAME}"
+      container: "incoming-events"
+      connection_string: "${BLOB_CONNECTION_STRING}"
+      event_grid:
+        enabled: true
+        topic: "blob-events-topic"
+        event_types:
+          - "Microsoft.Storage.BlobCreated"
+          
+  - name: "cosmos-change-feed"
+    type: "cosmos_db"
+    config:
+      endpoint: "${COSMOS_ENDPOINT}"
+      key: "${COSMOS_KEY}"
+      database: "nrdot"
+      container: "events"
+      change_feed:
+        start_from: "now"
+        feed_poll_delay: "5s"
+        lease_container: "leases"
+
+# Processing pipeline with Azure services
+processors:
+  - name: "azure-functions"
+    type: "function_app"
+    config:
+      function_url: "${FUNCTION_APP_URL}"
+      key: "${FUNCTION_KEY}"
+      max_concurrent: 100
+      timeout: "5m"
+      retry:
+        max_attempts: 3
+        backoff: "exponential"
+        
+  - name: "logic-apps"
+    type: "logic_app"
+    config:
+      workflow_url: "${LOGIC_APP_URL}"
+      sas_token: "${LOGIC_APP_SAS}"
+      async: true
+      callback_url: "https://nrdot.example.com/callback"
+      
+  - name: "cognitive-services"
+    type: "cognitive"
+    config:
+      endpoint: "${COGNITIVE_ENDPOINT}"
+      key: "${COGNITIVE_KEY}"
+      services:
+        - type: "text_analytics"
+          features: ["sentiment", "key_phrases", "entities"]
+        - type: "anomaly_detector"
+          sensitivity: 95
+          
+  - name: "stream-analytics"
+    type: "stream_analytics"
+    config:
+      job_name: "nrdot-processing"
+      query: |
+        SELECT
+          event_id,
+          event_type,
+          System.Timestamp() as processed_at,
+          AVG(value) OVER (LIMIT DURATION(minute, 5)) as avg_5min
+        INTO output
+        FROM input
+        GROUP BY TumblingWindow(minute, 1)
+
+# Azure storage outputs
+outputs:
+  - name: "synapse-analytics"
+    type: "synapse"
+    config:
+      workspace: "${SYNAPSE_WORKSPACE}"
+      sql_pool: "nrdot_pool"
+      table: "events"
+      staging:
+        account: "${STAGING_ACCOUNT}"
+        container: "staging"
+        format: "parquet"
+      authentication:
+        type: "managed_identity"
+      distribution: "HASH(tenant_id)"
+      indexing: "CLUSTERED COLUMNSTORE INDEX"
+      
+  - name: "data-lake-gen2"
+    type: "adls_gen2"
+    config:
+      account: "${ADLS_ACCOUNT_NAME}"
+      filesystem: "nrdot-data"
+      path: "processed/{year}/{month}/{day}/{hour}/"
+      format: "delta"
+      partition_by: ["tenant_id", "event_type"]
+      optimize:
+        enabled: true
+        file_size_mb: 128
+        z_order_by: ["timestamp"]
+      acl:
+        default_permissions: "r-x"
+        
+  - name: "cosmos-db"
+    type: "cosmos_db"
+    config:
+      endpoint: "${COSMOS_ENDPOINT}"
+      key: "${COSMOS_KEY}"
+      database: "nrdot"
+      container: "processed_events"
+      partition_key: "/tenantId"
+      consistency_level: "Session"
+      ttl: 2592000  # 30 days
+      indexing_policy:
+        automatic: true
+        indexing_mode: "consistent"
+        included_paths:
+          - path: "/*"
+        excluded_paths:
+          - path: "/\"_etag\"/?"
+          
+  - name: "table-storage"
+    type: "table_storage"
+    config:
+      account: "${STORAGE_ACCOUNT_NAME}"
+      table: "nrdotevents"
+      partition_key: "tenant_id"
+      row_key: "event_id"
+      batch_size: 100
+      
+  - name: "application-insights"
+    type: "app_insights"
+    config:
+      instrumentation_key: "${APP_INSIGHTS_KEY}"
+      telemetry_types:
+        - "metrics"
+        - "events"
+        - "traces"
+      sampling:
+        percentage: 10
+        evaluation_interval: "15s"
+
+# State management
+state:
+  backend: "cosmos_db"
+  config:
+    endpoint: "${COSMOS_ENDPOINT}"
+    key: "${COSMOS_KEY}"
+    database: "nrdot"
+    container: "state"
+    consistency: "strong"
+    lease_container: "state_leases"
+
+# Caching with Azure Cache for Redis
+cache:
+  backend: "azure_redis"
+  config:
+    hostname: "${REDIS_HOSTNAME}"
+    port: 6380
+    password: "${REDIS_KEY}"
+    ssl: true
+    database: 0
+    clustering:
+      enabled: true
+      replicas: 2
+
+# Azure-specific monitoring
+monitoring:
+  azure_monitor:
+    enabled: true
+    workspace_id: "${LOG_ANALYTICS_WORKSPACE_ID}"
+    workspace_key: "${LOG_ANALYTICS_KEY}"
+    
+  application_insights:
+    enabled: true
+    instrumentation_key: "${APP_INSIGHTS_KEY}"
+    cloud_role: "nrdot-host"
+    cloud_role_instance: "${HOSTNAME}"
+    
+  diagnostics:
+    enabled: true
+    logs:
+      - category: "ApplicationLogs"
+        retention_days: 30
+    metrics:
+      - category: "AllMetrics"
+        retention_days: 90
+
+# Auto-scaling with VMSS or AKS
+autoscaling:
+  platform: "aks"  # vmss or aks
+  min_instances: 3
+  max_instances: 100
+  metrics:
+    - name: "Percentage CPU"
+      target: 70
+    - name: "Event Hub Lag"
+      target: 10000
+    - name: "Custom Metric"
+      namespace: "nrdot"
+      name: "queue_depth"
+      target: 5000
+
+# Azure security features
+security:
+  encryption:
+    at_rest:
+      enabled: true
+      cmk:
+        vault_name: "${KEY_VAULT_NAME}"
+        key_name: "nrdot-encryption-key"
+        key_version: "${KEY_VERSION}"
+    in_transit:
+      enabled: true
+      min_tls_version: "1.2"
+      
+  identity:
+    type: "managed_identity"
+    client_id: "${MANAGED_IDENTITY_CLIENT_ID}"
+    
+  key_vault:
+    name: "${KEY_VAULT_NAME}"
+    secrets:
+      - name: "cosmos-key"
+        env_var: "COSMOS_KEY"
+      - name: "storage-key"
+        env_var: "STORAGE_KEY"
+    certificates:
+      - name: "ssl-cert"
+        
+  network:
+    service_endpoints:
+      - "Microsoft.Storage"
+      - "Microsoft.KeyVault"
+      - "Microsoft.EventHub"
+      - "Microsoft.ServiceBus"
+    private_endpoints:
+      enabled: true
+      subnet: "private-endpoints"
+
+# Cost management
+cost_management:
+  # Spot instances for batch processing
+  spot_instances:
+    enabled: true
+    max_price: -1  # Pay up to on-demand price
+    eviction_policy: "Delete"
+    
+  # Reserved instances
+  reserved_capacity:
+    vm_instances: 10
+    cosmos_ru: 10000
+    
+  # Auto-shutdown for dev/test
+  auto_shutdown:
+    enabled: "${ENVIRONMENT == 'dev'}"
+    time: "19:00"
+    timezone: "UTC"
+    
+  # Resource tagging
+  tags:
+    Environment: "${ENVIRONMENT}"
+    CostCenter: "${COST_CENTER}"
+    Project: "NRDOT"
+    ManagedBy: "Terraform"
+
+# Multi-region deployment
+multi_region:
+  enabled: true
+  primary: "eastus"
+  secondary:
+    - region: "westeurope"
+      read_only: false
+    - region: "southeastasia"
+      read_only: true
+  traffic_manager:
+    profile: "nrdot-global"
+    routing_method: "Performance"
+    
+# Disaster recovery
+disaster_recovery:
+  backup:
+    enabled: true
+    vault_name: "${BACKUP_VAULT_NAME}"
+    policy: "DailyBackup"
+    retention_days: 30
+    
+  geo_replication:
+    storage_accounts: true
+    cosmos_db: true
+    sql_databases: true
+    
+  site_recovery:
+    enabled: true
+    vault_name: "${RECOVERY_VAULT_NAME}"
+    replication_policy: "24hour-retention"
+
+# Compliance and governance
+governance:
+  policies:
+    - "ISO 27001"
+    - "SOC 2"
+    - "HIPAA"
+    
+  azure_policy:
+    enabled: true
+    assignments:
+      - "Require encryption"
+      - "Allowed locations"
+      - "Require tags"
+      
+  activity_logs:
+    retention_days: 90
+    export_to_event_hub: true
+    
+  resource_locks:
+    production_resources: "CanNotDelete"

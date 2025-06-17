@@ -1,0 +1,37 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+    purge)
+        # Remove user and group
+        if getent passwd nrdot >/dev/null; then
+            deluser --quiet nrdot >/dev/null || true
+        fi
+        
+        if getent group nrdot >/dev/null; then
+            delgroup --quiet nrdot >/dev/null || true
+        fi
+        
+        # Remove directories
+        rm -rf /etc/nrdot
+        rm -rf /var/lib/nrdot
+        rm -rf /var/log/nrdot
+        rm -rf /var/cache/nrdot
+        rm -rf /run/nrdot
+        
+        # Remove logrotate config
+        rm -f /etc/logrotate.d/nrdot
+        ;;
+    
+    remove|upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
+        ;;
+    
+    *)
+        echo "postrm called with unknown argument \`$1'" >&2
+        exit 1
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

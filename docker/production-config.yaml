@@ -1,0 +1,208 @@
+# NRDOT Production Configuration
+# This file is used by the config-engine to generate OpenTelemetry configurations
+
+# New Relic License Key (set via environment variable or secret)
+license_key: ${NEW_RELIC_LICENSE_KEY}
+
+# Deployment environment
+environment: production
+
+# Host monitoring configuration
+host_monitoring:
+  enabled: true
+  collection_interval: 60s
+  
+  # CPU metrics
+  cpu:
+    enabled: true
+    detailed_metrics: false  # Reduce cardinality in production
+  
+  # Memory metrics
+  memory:
+    enabled: true
+    include_buffers_cache: true
+  
+  # Disk metrics
+  disk:
+    enabled: true
+    include_partitions:
+      - /
+      - /data
+      - /var
+    exclude_mount_points:
+      - /dev
+      - /proc
+      - /sys
+  
+  # Network metrics
+  network:
+    enabled: true
+    include_interfaces:
+      - eth0
+      - eth1
+    exclude_interfaces:
+      - lo
+      - docker0
+
+# Process monitoring
+process_monitoring:
+  enabled: true
+  include_patterns:
+    - "java"
+    - "python"
+    - "node"
+    - "nginx"
+    - "postgres"
+    - "mysql"
+    - "redis"
+  exclude_patterns:
+    - "kernel"
+  collection_interval: 60s
+  include_command_line: false  # Privacy consideration
+
+# Container monitoring
+container_monitoring:
+  enabled: true
+  docker_endpoint: unix:///var/run/docker.sock
+  collection_interval: 60s
+  include_labels:
+    - app
+    - version
+    - environment
+  exclude_containers:
+    - "nrdot-*"  # Don't monitor self
+
+# Log collection
+log_collection:
+  enabled: true
+  paths:
+    - /var/log/messages
+    - /var/log/syslog
+    - /var/log/application/*.log
+  exclude_patterns:
+    - "*.gz"
+    - "*.zip"
+  multiline_pattern: '^\d{4}-\d{2}-\d{2}'
+  max_log_size: 100MB
+  encoding: utf-8
+
+# Security settings (strict for production)
+security:
+  redact_patterns:
+    - credit_card
+    - ssn
+    - api_key
+    - password
+    - token
+    - secret
+  drop_metrics_with_high_cardinality: true
+  max_cardinality_per_metric: 5000
+  sanitize_labels: true
+  allowed_domains:
+    - "*.company.com"
+    - "*.internal.company.com"
+
+# Enrichment settings
+enrichment:
+  add_host_metadata: true
+  add_cloud_metadata: true
+  add_kubernetes_metadata: false
+  add_docker_metadata: true
+  add_environment_variables:
+    - ENVIRONMENT
+    - REGION
+    - DATACENTER
+    - SERVICE_NAME
+
+# Transform settings
+transforms:
+  calculate_rates:
+    - cpu.utilization
+    - network.io.bytes
+    - disk.io.bytes
+  aggregate_metrics:
+    - pattern: "container.*.cpu.*"
+      method: avg
+      interval: 5m
+    - pattern: "process.*.memory.*"
+      method: max
+      interval: 5m
+
+# Export settings
+exporters:
+  newrelic:
+    endpoint: ${NEW_RELIC_OTLP_ENDPOINT:-otlp.nr-data.net:4317}
+    compression: gzip
+    timeout: 30s
+    headers:
+      - "X-Environment: production"
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 300s
+      max_elapsed_time: 900s
+    sending_queue:
+      enabled: true
+      num_consumers: 10
+      queue_size: 5000
+    tls:
+      insecure: false
+      insecure_skip_verify: false
+
+# Pipeline configuration
+pipelines:
+  metrics:
+    receivers:
+      - hostmetrics
+      - docker
+    processors:
+      - memory_limiter
+      - nrsecurity
+      - nrenrich
+      - nrtransform
+      - nrcap
+      - batch
+    exporters:
+      - newrelic
+  
+  logs:
+    receivers:
+      - filelog
+      - docker
+    processors:
+      - memory_limiter
+      - nrsecurity
+      - nrenrich
+      - batch
+    exporters:
+      - newrelic
+  
+  traces:
+    receivers:
+      - otlp
+    processors:
+      - memory_limiter
+      - nrsecurity
+      - nrenrich
+      - batch
+    exporters:
+      - newrelic
+
+# Resource limits (production values)
+resource_limits:
+  memory_limit_mib: 4096
+  memory_spike_limit_mib: 1024
+  check_interval: 1s
+
+# Batch processor settings
+batch:
+  timeout: 10s
+  send_batch_size: 1000
+  send_batch_max_size: 2000
+
+# Performance tuning
+performance:
+  num_consumers: 10
+  buffer_size: 1000
+  gc_percent: 80
+  max_procs: 4

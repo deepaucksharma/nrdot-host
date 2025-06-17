@@ -1,0 +1,146 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  # Metric transformations
+  metricstransform:
+    transforms:
+      # Unit conversions
+      - include: test_gauge_0
+        match_type: strict
+        action: update
+        operations:
+          - action: scale_value
+            scale: 0.001  # Convert bytes to KB
+          - action: update_unit
+            unit: KB
+
+      - include: test_histogram_2
+        match_type: strict
+        action: update
+        operations:
+          - action: scale_value
+            scale: 0.001  # Convert ms to seconds
+          - action: update_unit
+            unit: s
+
+      # Metric renaming
+      - include: test_gauge_*
+        match_type: regexp
+        action: update
+        new_name: system.memory.usage
+
+      - include: test_counter_1
+        match_type: strict
+        action: update
+        new_name: http.requests.total
+
+      - include: test_histogram_2
+        match_type: strict
+        action: update
+        new_name: http.request.duration
+
+  # Label manipulation
+  attributes/transform:
+    actions:
+      - key: old_label
+        new_key: new_label
+        action: rename
+      - key: remove_me
+        action: delete
+      - key: transform_me
+        action: update
+        value: transformed_value
+      - key: new_label
+        value: added_value
+        action: insert
+      - key: tier
+        value: backend
+        action: insert
+
+  # Filtering
+  filter:
+    metrics:
+      exclude:
+        match_type: regexp
+        metric_names:
+          - "test_summary_.*"
+        resource_attributes:
+          - Key: environment
+            Value: development
+
+  # Aggregation
+  cumulativetodelta:
+    include:
+      match_type: regexp
+      metrics:
+        - ".*_total$"
+        - ".*_count$"
+
+exporters:
+  logging:
+    loglevel: debug
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+  otlp:
+    endpoint: mock-backend:4317
+    tls:
+      insecure: true
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: 
+        - memory_limiter
+        - metricstransform
+        - attributes/transform
+        - filter
+        - cumulativetodelta
+        - batch
+      exporters: [logging, otlp]
+    
+    traces:
+      receivers: [otlp]
+      processors: 
+        - memory_limiter
+        - attributes/transform
+        - batch
+      exporters: [logging, otlp]
+    
+    logs:
+      receivers: [otlp]
+      processors: 
+        - memory_limiter
+        - attributes/transform
+        - batch
+      exporters: [logging, otlp]
+
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888
+
+  extensions: [health_check]
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+    path: "/health"

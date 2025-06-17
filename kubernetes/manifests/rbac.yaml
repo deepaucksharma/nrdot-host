@@ -1,0 +1,367 @@
+# Collector ClusterRole - needs access to cluster metrics and resources
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: nrdot-collector
+  labels:
+    app.kubernetes.io/name: nrdot
+    app.kubernetes.io/component: collector
+    app.kubernetes.io/part-of: nrdot-host
+rules:
+  # Core resources
+  - apiGroups: [""]
+    resources:
+      - nodes
+      - nodes/metrics
+      - nodes/stats
+      - nodes/proxy
+      - services
+      - endpoints
+      - pods
+      - pods/log
+      - namespaces
+      - resourcequotas
+      - replicationcontrollers
+      - limitranges
+      - persistentvolumeclaims
+      - persistentvolumes
+      - events
+      - configmaps
+      - secrets
+    verbs: ["get", "list", "watch"]
+  # Apps resources
+  - apiGroups: ["apps"]
+    resources:
+      - daemonsets
+      - deployments
+      - replicasets
+      - statefulsets
+    verbs: ["get", "list", "watch"]
+  # Batch resources
+  - apiGroups: ["batch"]
+    resources:
+      - jobs
+      - cronjobs
+    verbs: ["get", "list", "watch"]
+  # Metrics resources
+  - apiGroups: ["metrics.k8s.io"]
+    resources:
+      - nodes
+      - pods
+    verbs: ["get", "list", "watch"]
+  # Storage resources
+  - apiGroups: ["storage.k8s.io"]
+    resources:
+      - storageclasses
+      - volumeattachments
+    verbs: ["get", "list", "watch"]
+  # Networking resources
+  - apiGroups: ["networking.k8s.io"]
+    resources:
+      - ingresses
+      - networkpolicies
+    verbs: ["get", "list", "watch"]
+  # Policy resources
+  - apiGroups: ["policy"]
+    resources:
+      - poddisruptionbudgets
+    verbs: ["get", "list", "watch"]
+  # Autoscaling resources
+  - apiGroups: ["autoscaling"]
+    resources:
+      - horizontalpodautoscalers
+      - verticalpodautoscalers
+    verbs: ["get", "list", "watch"]
+---
+# Collector ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: nrdot-collector
+  labels:
+    app.kubernetes.io/name: nrdot
+    app.kubernetes.io/component: collector
+    app.kubernetes.io/part-of: nrdot-host
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: nrdot-collector
+subjects:
+  - kind: ServiceAccount
+    name: nrdot-collector
+    namespace: nrdot-system
+---
+# Supervisor ClusterRole - needs to watch and manage NRDOT resources
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: nrdot-supervisor
+  labels:
+    app.kubernetes.io/name: nrdot
+    app.kubernetes.io/component: supervisor
+    app.kubernetes.io/part-of: nrdot-host
+rules:
+  - apiGroups: [""]
+    resources:
+      - pods
+      - pods/status
+      - pods/exec
+      - services
+      - endpoints
+      - configmaps
+      - events
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - daemonsets
+      - replicasets
+      - statefulsets
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: ["batch"]
+    resources:
+      - jobs
+    verbs: ["get", "list", "watch", "create", "delete"]
+---
+# Supervisor ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: nrdot-supervisor
+  labels:
+    app.kubernetes.io/name: nrdot
+    app.kubernetes.io/component: supervisor
+    app.kubernetes.io/part-of: nrdot-host
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: nrdot-supervisor
+subjects:
+  - kind: ServiceAccount
+    name: nrdot-supervisor
+    namespace: nrdot-system
+---
+# Config Engine Role - only needs access within namespace
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: nrdot-config-engine
+  namespace: nrdot-system
+  labels:
+    app.kubernetes.io/name: nrdot
+    app.kubernetes.io/component: config-engine
+    app.kubernetes.io/part-of: nrdot-host
+rules:
+  - apiGroups: [""]
+    resources:
+      - configmaps
+      - secrets
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: [""]
+    resources:
+      - events
+    verbs: ["create", "patch"]
+---
+# Config Engine RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: nrdot-config-engine
+  namespace: nrdot-system
+  labels:
+    app.kubernetes.io/name: nrdot
+    app.kubernetes.io/component: config-engine
+    app.kubernetes.io/part-of: nrdot-host
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: nrdot-config-engine
+subjects:
+  - kind: ServiceAccount
+    name: nrdot-config-engine
+    namespace: nrdot-system
+---
+# API Server Role
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: nrdot-api-server
+  namespace: nrdot-system
+  labels:
+    app.kubernetes.io/name: nrdot
+    app.kubernetes.io/component: api-server
+    app.kubernetes.io/part-of: nrdot-host
+rules:
+  - apiGroups: [""]
+    resources:
+      - pods
+      - services
+      - configmaps
+      - secrets
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - daemonsets
+      - statefulsets
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources:
+      - events
+    verbs: ["create", "patch"]
+---
+# API Server RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: nrdot-api-server
+  namespace: nrdot-system
+  labels:
+    app.kubernetes.io/name: nrdot
+    app.kubernetes.io/component: api-server
+    app.kubernetes.io/part-of: nrdot-host
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: nrdot-api-server
+subjects:
+  - kind: ServiceAccount
+    name: nrdot-api-server
+    namespace: nrdot-system
+---
+# Privileged Helper needs special permissions
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: nrdot-privileged-helper
+  labels:
+    app.kubernetes.io/name: nrdot
+    app.kubernetes.io/component: privileged-helper
+    app.kubernetes.io/part-of: nrdot-host
+rules:
+  - apiGroups: [""]
+    resources:
+      - nodes
+      - nodes/proxy
+      - pods
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources:
+      - nodes/metrics
+      - nodes/stats
+    verbs: ["get"]
+  # Required for container runtime access
+  - apiGroups: [""]
+    resources:
+      - pods/exec
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: nrdot-privileged-helper
+  labels:
+    app.kubernetes.io/name: nrdot
+    app.kubernetes.io/component: privileged-helper
+    app.kubernetes.io/part-of: nrdot-host
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: nrdot-privileged-helper
+subjects:
+  - kind: ServiceAccount
+    name: nrdot-privileged-helper
+    namespace: nrdot-system
+---
+# Pod Security Policy (if PSP is enabled)
+apiVersion: policy/v1beta1
+kind: PodSecurityPolicy
+metadata:
+  name: nrdot-restricted
+  labels:
+    app.kubernetes.io/name: nrdot
+    app.kubernetes.io/part-of: nrdot-host
+spec:
+  privileged: false
+  allowPrivilegeEscalation: false
+  requiredDropCapabilities:
+    - ALL
+  volumes:
+    - configMap
+    - emptyDir
+    - projected
+    - secret
+    - downwardAPI
+    - persistentVolumeClaim
+  hostNetwork: false
+  hostIPC: false
+  hostPID: false
+  runAsUser:
+    rule: MustRunAsNonRoot
+  seLinux:
+    rule: RunAsAny
+  supplementalGroups:
+    rule: RunAsAny
+  fsGroup:
+    rule: RunAsAny
+  readOnlyRootFilesystem: true
+---
+# PSP for Privileged Helper (needs more permissions)
+apiVersion: policy/v1beta1
+kind: PodSecurityPolicy
+metadata:
+  name: nrdot-privileged
+  labels:
+    app.kubernetes.io/name: nrdot
+    app.kubernetes.io/component: privileged-helper
+    app.kubernetes.io/part-of: nrdot-host
+spec:
+  privileged: false
+  allowPrivilegeEscalation: true
+  allowedCapabilities:
+    - SYS_PTRACE
+    - DAC_READ_SEARCH
+  requiredDropCapabilities:
+    - FOWNER
+    - FSETID
+    - KILL
+    - SETGID
+    - SETUID
+    - SETPCAP
+    - NET_BIND_SERVICE
+    - NET_RAW
+    - SYS_CHROOT
+    - MKNOD
+    - AUDIT_WRITE
+    - SETFCAP
+  volumes:
+    - configMap
+    - emptyDir
+    - projected
+    - secret
+    - downwardAPI
+    - persistentVolumeClaim
+    - hostPath
+  allowedHostPaths:
+    - pathPrefix: /proc
+      readOnly: true
+    - pathPrefix: /sys
+      readOnly: true
+    - pathPrefix: /var/run/docker.sock
+      readOnly: true
+    - pathPrefix: /var/run/containerd/containerd.sock
+      readOnly: true
+    - pathPrefix: /var/run/crio/crio.sock
+      readOnly: true
+  hostNetwork: false
+  hostIPC: false
+  hostPID: true
+  runAsUser:
+    rule: RunAsAny
+  seLinux:
+    rule: RunAsAny
+  supplementalGroups:
+    rule: RunAsAny
+  fsGroup:
+    rule: RunAsAny
+  readOnlyRootFilesystem: false

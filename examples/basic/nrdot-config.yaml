@@ -1,0 +1,108 @@
+# Basic NRDOT-HOST Configuration
+# This configuration is suitable for development and testing
+
+# Server configuration
+server:
+  host: "0.0.0.0"
+  port: 8080
+  log_level: "info"
+  
+# API configuration  
+api:
+  enabled: true
+  cors:
+    enabled: true
+    origins: ["*"]
+  rate_limit:
+    enabled: true
+    requests_per_minute: 60
+
+# Data sources
+sources:
+  - name: "http-webhook"
+    type: "http"
+    config:
+      endpoint: "/webhook"
+      method: "POST"
+      auth:
+        type: "none"
+  
+  - name: "file-watcher"
+    type: "file"
+    config:
+      path: "/data/input"
+      pattern: "*.json"
+      poll_interval: "10s"
+
+# Processing pipeline
+processors:
+  - name: "validator"
+    type: "validate"
+    config:
+      schema:
+        type: "object"
+        required: ["id", "timestamp"]
+        properties:
+          id:
+            type: "string"
+          timestamp:
+            type: "string"
+            format: "date-time"
+  
+  - name: "enricher"
+    type: "enrich"
+    config:
+      fields:
+        processed_at: "{{ now }}"
+        environment: "development"
+  
+  - name: "transformer"
+    type: "transform"
+    config:
+      mapping:
+        event_id: "$.id"
+        event_time: "$.timestamp"
+        data: "$.payload"
+
+# Output destinations
+outputs:
+  - name: "console"
+    type: "console"
+    config:
+      format: "json"
+      pretty: true
+  
+  - name: "file-output"
+    type: "file"
+    config:
+      path: "/data/output"
+      format: "jsonl"
+      rotation:
+        size: "100MB"
+        time: "24h"
+        compress: true
+
+# Metrics and monitoring
+metrics:
+  enabled: true
+  endpoint: "/metrics"
+  collectors:
+    - "golang"
+    - "process"
+    - "custom"
+
+# Health checks
+health:
+  enabled: true
+  endpoint: "/health"
+  checks:
+    - name: "disk_space"
+      threshold: "90%"
+    - name: "memory"
+      threshold: "80%"
+
+# Resource limits
+resources:
+  max_goroutines: 100
+  max_memory: "1GB"
+  gc_percent: 20

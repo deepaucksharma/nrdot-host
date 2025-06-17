@@ -1,0 +1,66 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 2s  # Changed from 1s
+    send_batch_size: 2048  # Changed from 1024
+
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 1024  # Changed from 512
+    spike_limit_mib: 256  # Changed from 128
+
+  # Added new processor
+  attributes:
+    actions:
+      - key: updated_config
+        value: "true"
+        action: insert
+
+exporters:
+  logging:
+    loglevel: info  # Changed from debug
+    sampling_initial: 10  # Changed from 5
+    sampling_thereafter: 500  # Changed from 200
+
+  otlp:
+    endpoint: mock-backend:4317
+    tls:
+      insecure: true
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, attributes, batch]  # Added attributes processor
+      exporters: [logging, otlp]
+    
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [logging, otlp]
+    
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [logging, otlp]
+
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888
+
+  extensions: [health_check]
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+    path: "/health"

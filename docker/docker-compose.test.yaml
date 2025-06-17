@@ -1,0 +1,138 @@
+version: '3.8'
+
+# Test Docker Compose Stack
+# Used for running integration tests in containers
+
+networks:
+  nrdot-test:
+    driver: bridge
+
+volumes:
+  test-results:
+
+services:
+  # Test runner container
+  test-runner:
+    build:
+      context: ..
+      dockerfile: docker/test/Dockerfile.test
+    image: nrdot-test-runner:latest
+    container_name: nrdot-test-runner
+    networks:
+      - nrdot-test
+    volumes:
+      - test-results:/results
+      - ../:/workspace:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - TEST_SUITE=${TEST_SUITE:-all}
+      - TEST_TIMEOUT=${TEST_TIMEOUT:-30m}
+      - COVERAGE_ENABLED=${COVERAGE_ENABLED:-true}
+      - REPORT_FORMAT=${REPORT_FORMAT:-junit}
+    depends_on:
+      - test-collector
+      - test-api-server
+      - test-prometheus
+    command: ["/usr/local/bin/run-tests.sh"]
+
+  # Test instance of collector
+  test-collector:
+    image: nrdot-collector:${TAG:-latest}
+    container_name: test-nrdot-collector
+    networks:
+      - nrdot-test
+    volumes:
+      - ./test-configs/collector.yaml:/etc/otel/config.yaml:ro
+    environment:
+      - NRDOT_COLLECTOR_CONFIG=/etc/otel/config.yaml
+      - OTEL_LOG_LEVEL=debug
+      - TEST_MODE=true
+
+  # Test instance of API server
+  test-api-server:
+    image: nrdot-api-server:${TAG:-latest}
+    container_name: test-nrdot-api-server
+    networks:
+      - nrdot-test
+    ports:
+      - "8081:8080"
+    environment:
+      - NRDOT_API_PORT=8080
+      - NRDOT_API_AUTH_ENABLED=false
+      - TEST_MODE=true
+
+  # Test Prometheus for metrics verification
+  test-prometheus:
+    image: prom/prometheus:latest
+    container_name: test-prometheus
+    networks:
+      - nrdot-test
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./test-configs/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=1h'
+
+  # Mock New Relic endpoint
+  mock-nr-endpoint:
+    image: mockserver/mockserver:latest
+    container_name: test-nr-endpoint
+    networks:
+      - nrdot-test
+    ports:
+      - "4317:4317"  # OTLP gRPC
+      - "1080:1080"  # MockServer admin
+    environment:
+      - MOCKSERVER_PROPERTY_FILE=/config/mockserver.properties
+      - MOCKSERVER_INITIALIZATION_JSON_PATH=/config/expectations.json
+    volumes:
+      - ./test-configs/mockserver:/config:ro
+
+  # Test data generator
+  test-data-generator:
+    build:
+      context: ./test
+      dockerfile: Dockerfile.generator
+    image: nrdot-test-generator:latest
+    container_name: test-data-generator
+    networks:
+      - nrdot-test
+    environment:
+      - COLLECTOR_ENDPOINT=test-collector:4317
+      - GENERATION_RATE=100
+      - METRIC_COUNT=50
+      - LOG_COUNT=10
+    depends_on:
+      - test-collector
+
+# Test profiles for different scenarios
+profiles:
+  unit:
+    services:
+      - test-runner
+  
+  integration:
+    services:
+      - test-runner
+      - test-collector
+      - test-api-server
+      - test-prometheus
+      - mock-nr-endpoint
+  
+  load:
+    services:
+      - test-runner
+      - test-collector
+      - test-api-server
+      - test-prometheus
+      - mock-nr-endpoint
+      - test-data-generator
+  
+  security:
+    services:
+      - test-runner
+      - test-collector
+      - test-api-server

@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  nrdot-host:
+    image: nrdot/nrdot-host:latest
+    container_name: nrdot-host-basic
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./nrdot-config.yaml:/etc/nrdot/config.yaml:ro
+      - ./data:/data
+    environment:
+      - NRDOT_CONFIG_PATH=/etc/nrdot/config.yaml
+      - NRDOT_LOG_FORMAT=json
+      - NRDOT_ENV=development
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - nrdot-network
+
+  # Optional: Redis for caching
+  redis:
+    image: redis:7-alpine
+    container_name: nrdot-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    networks:
+      - nrdot-network
+
+  # Optional: PostgreSQL for persistence
+  postgres:
+    image: postgres:15-alpine
+    container_name: nrdot-postgres
+    environment:
+      - POSTGRES_USER=nrdot
+      - POSTGRES_PASSWORD=nrdot123
+      - POSTGRES_DB=nrdot
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - nrdot-network
+
+volumes:
+  redis-data:
+  postgres-data:
+
+networks:
+  nrdot-network:
+    driver: bridge

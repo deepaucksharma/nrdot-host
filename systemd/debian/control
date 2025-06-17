@@ -1,0 +1,42 @@
+Source: nrdot
+Section: net
+Priority: optional
+Maintainer: NRDOT Team <nrdot@example.com>
+Build-Depends: debhelper-compat (= 13),
+               dh-systemd,
+               golang-go (>= 1.19),
+               gcc,
+               make,
+               libc6-dev
+Standards-Version: 4.6.0
+Homepage: https://github.com/NRDOT/nrdot-host
+Vcs-Browser: https://github.com/NRDOT/nrdot-host
+Vcs-Git: https://github.com/NRDOT/nrdot-host.git
+Rules-Requires-Root: no
+
+Package: nrdot
+Architecture: any
+Depends: ${shlibs:Depends},
+         ${misc:Depends},
+         systemd,
+         iproute2,
+         ethtool,
+         openssl,
+         adduser
+Recommends: linux-image-generic (>= 4.14)
+Suggests: prometheus,
+          grafana
+Description: Network Resource Discovery and Optimization Toolkit
+ NRDOT (Network Resource Discovery and Optimization Toolkit) is a comprehensive
+ platform for network monitoring, resource discovery, and performance optimization.
+ It provides real-time visibility into network infrastructure, automates resource
+ discovery, and enables intelligent optimization of network resources.
+ .
+ Features:
+  - Real-time network monitoring with eBPF
+  - Automatic resource discovery
+  - Performance optimization
+  - RESTful API for integration
+  - Prometheus metrics export
+  - Multi-protocol support (TCP, UDP, ICMP)
+  - Configuration management engine

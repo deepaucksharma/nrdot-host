@@ -1,0 +1,165 @@
+# NRDOT Configuration for Security Compliance E2E Test
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  docker_logs:
+    endpoint: unix:///var/run/docker.sock
+    include_patterns:
+      - vulnerable-app
+    operators:
+      - type: json_parser
+        timestamp:
+          parse_from: attributes.time
+          layout: '%Y-%m-%dT%H:%M:%S.%fZ'
+
+processors:
+  batch:
+    timeout: 10s
+    send_batch_size: 1024
+
+  attributes:
+    actions:
+      - key: environment
+        value: security-test
+        action: upsert
+
+  # Secret detection and redaction processor
+  redaction:
+    allow_all_keys: true
+    blocked_values:
+      # Password patterns
+      - regex: '(?i)(password|passwd|pwd)\s*[:=]\s*["\']?([^"\'\s]+)'
+        replacement: '[REDACTED_PASSWORD]'
+      
+      # API key patterns
+      - regex: '(?i)(api[_-]?key|apikey)\s*[:=]\s*["\']?([a-zA-Z0-9\-_]+)'
+        replacement: '[REDACTED_API_KEY]'
+      
+      # AWS credentials
+      - regex: 'AKIA[0-9A-Z]{16}'
+        replacement: '[REDACTED_AWS_ACCESS_KEY]'
+      - regex: '(?i)(aws[_-]?secret[_-]?access[_-]?key|aws[_-]?secret)\s*[:=]\s*["\']?([a-zA-Z0-9+/]{40})'
+        replacement: '[REDACTED_AWS_SECRET]'
+      
+      # GitHub tokens
+      - regex: 'ghp_[a-zA-Z0-9]{36}'
+        replacement: '[REDACTED_GITHUB_TOKEN]'
+      
+      # Stripe keys
+      - regex: 'sk_(test|live)_[a-zA-Z0-9]{24}'
+        replacement: '[REDACTED_STRIPE_KEY]'
+      
+      # JWT secrets
+      - regex: '(?i)(jwt[_-]?secret|secret[_-]?key)\s*[:=]\s*["\']?([^"\'\s]+)'
+        replacement: '[REDACTED_JWT_SECRET]'
+      
+      # Credit card numbers
+      - regex: '\b(?:\d[ -]*?){13,16}\b'
+        replacement: '[REDACTED_CARD_NUMBER]'
+      
+      # Database connection strings
+      - regex: '(mongodb|postgres|postgresql|mysql|redis|elasticsearch)://[^:]+:([^@]+)@'
+        replacement: '$1://[REDACTED_USER]:[REDACTED_PASSWORD]@'
+
+  # Attributes processor to redact span attributes
+  attributes/security:
+    actions:
+      # Redact specific attribute keys
+      - key: db.password
+        action: update
+        value: '[REDACTED]'
+      - key: api.key
+        action: update
+        value: '[REDACTED]'
+      - key: payment.card_number
+        action: update
+        value: '[REDACTED]'
+      - key: payment.stripe_key
+        action: update
+        value: '[REDACTED]'
+      - key: aws.access_key_id
+        action: update
+        value: '[REDACTED]'
+      - key: aws.secret_access_key
+        action: update
+        value: '[REDACTED]'
+      - key: github.token
+        action: update
+        value: '[REDACTED]'
+      
+      # Redact from db.statement
+      - key: db.statement
+        action: update
+        from_attribute: db.statement
+        pattern: "password='([^']+)'"
+        replacement: "password='[REDACTED]'"
+
+  # Security metrics processor
+  spanmetrics:
+    metrics_exporter: prometheus
+    dimensions:
+      - name: security.violation_type
+      - name: service.name
+      - name: span.kind
+
+exporters:
+  otlp/jaeger:
+    endpoint: jaeger:4317
+    tls:
+      insecure: true
+
+  elasticsearch:
+    endpoints: ["http://elasticsearch:9200"]
+    logs_index: security-logs
+    traces_index: security-traces
+
+  prometheus:
+    endpoint: 0.0.0.0:8888
+    namespace: nrdot_security
+    const_labels:
+      source: nrdot
+
+  # Security alerts exporter
+  file/security_alerts:
+    path: /tmp/security_alerts.json
+    format: json
+
+  debug:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 100
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch, attributes, attributes/security, redaction, spanmetrics]
+      exporters: [otlp/jaeger, elasticsearch, debug]
+      
+    logs:
+      receivers: [docker_logs]
+      processors: [batch, attributes, redaction]
+      exporters: [elasticsearch, file/security_alerts]
+      
+    metrics:
+      receivers: [prometheus]
+      processors: [batch, attributes]
+      exporters: [prometheus]
+      
+  telemetry:
+    logs:
+      level: info
+      output_paths: ["stdout"]
+    metrics:
+      address: 0.0.0.0:8889

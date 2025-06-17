@@ -1,0 +1,156 @@
+# NRDOT Configuration for Docker Development
+# This file is used by the config-engine to generate OpenTelemetry configurations
+
+# New Relic License Key (set via environment variable)
+license_key: ${NEW_RELIC_LICENSE_KEY}
+
+# Deployment environment
+environment: docker-dev
+
+# Host monitoring configuration
+host_monitoring:
+  enabled: true
+  collection_interval: 60s
+  
+  # CPU metrics
+  cpu:
+    enabled: true
+    detailed_metrics: true
+  
+  # Memory metrics
+  memory:
+    enabled: true
+    include_buffers_cache: true
+  
+  # Disk metrics
+  disk:
+    enabled: true
+    include_partitions:
+      - /
+      - /var/lib/docker
+  
+  # Network metrics
+  network:
+    enabled: true
+    include_interfaces:
+      - eth0
+      - docker0
+
+# Process monitoring
+process_monitoring:
+  enabled: true
+  include_patterns:
+    - "nrdot-*"
+    - "otelcol*"
+  collection_interval: 30s
+
+# Container monitoring (Docker)
+container_monitoring:
+  enabled: true
+  docker_endpoint: unix:///var/run/docker.sock
+  collection_interval: 30s
+  include_labels:
+    - com.docker.compose.project
+    - com.docker.compose.service
+
+# Log collection
+log_collection:
+  enabled: true
+  paths:
+    - /var/log/nrdot/*.log
+  multiline_pattern: '^\d{4}-\d{2}-\d{2}'
+
+# Security settings
+security:
+  redact_patterns:
+    - credit_card
+    - ssn
+    - api_key
+  drop_metrics_with_high_cardinality: true
+  max_cardinality_per_metric: 10000
+
+# Enrichment settings
+enrichment:
+  add_host_metadata: true
+  add_docker_metadata: true
+  add_environment_variables:
+    - HOSTNAME
+    - ENVIRONMENT
+
+# Transform settings
+transforms:
+  calculate_rates:
+    - cpu.utilization
+    - network.io.bytes
+  aggregate_metrics:
+    - pattern: "container.*.cpu.*"
+      method: avg
+      interval: 5m
+
+# Export settings
+exporters:
+  newrelic:
+    endpoint: ${NEW_RELIC_OTLP_ENDPOINT:-otlp.nr-data.net:4317}
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+  
+  # Local Prometheus for development
+  prometheus:
+    enabled: true
+    endpoint: 0.0.0.0:8888
+  
+  # Debug exporter for development
+  debug:
+    enabled: ${NRDOT_DEBUG:-false}
+    verbosity: detailed
+    sampling_initial: 10
+    sampling_thereafter: 100
+
+# Pipeline configuration
+pipelines:
+  metrics:
+    receivers:
+      - hostmetrics
+      - docker
+      - prometheus
+    processors:
+      - memory_limiter
+      - nrenrich
+      - nrtransform
+      - nrcap
+      - batch
+    exporters:
+      - newrelic
+      - prometheus
+  
+  logs:
+    receivers:
+      - filelog
+      - docker
+    processors:
+      - memory_limiter
+      - nrsecurity
+      - nrenrich
+      - batch
+    exporters:
+      - newrelic
+  
+  traces:
+    receivers:
+      - otlp
+    processors:
+      - memory_limiter
+      - nrenrich
+      - batch
+    exporters:
+      - newrelic
+
+# Resource limits
+resource_limits:
+  memory_limit_mib: 2048
+  memory_spike_limit_mib: 512
+  check_interval: 1s

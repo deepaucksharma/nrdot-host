@@ -1,0 +1,66 @@
+#!/usr/bin/make -f
+
+export DH_VERBOSE = 1
+export GO111MODULE = on
+export GOCACHE = $(CURDIR)/.cache/go-build
+
+%:
+	dh $@ --with systemd
+
+override_dh_auto_build:
+	# Build Go binaries
+	go build -ldflags="-s -w -X main.version=$(DEB_VERSION)" -o bin/nrdot-collector ./cmd/collector
+	go build -ldflags="-s -w -X main.version=$(DEB_VERSION)" -o bin/nrdot-supervisor ./cmd/supervisor
+	go build -ldflags="-s -w -X main.version=$(DEB_VERSION)" -o bin/nrdot-config-engine ./cmd/config-engine
+	go build -ldflags="-s -w -X main.version=$(DEB_VERSION)" -o bin/nrdot-api-server ./cmd/api-server
+	go build -ldflags="-s -w -X main.version=$(DEB_VERSION)" -o bin/nrdot-privileged-helper ./cmd/privileged-helper
+
+override_dh_auto_install:
+	# Install binaries
+	install -D -m 0755 bin/nrdot-collector $(CURDIR)/debian/nrdot/usr/bin/nrdot-collector
+	install -D -m 0755 bin/nrdot-supervisor $(CURDIR)/debian/nrdot/usr/bin/nrdot-supervisor
+	install -D -m 0755 bin/nrdot-config-engine $(CURDIR)/debian/nrdot/usr/bin/nrdot-config-engine
+	install -D -m 0755 bin/nrdot-api-server $(CURDIR)/debian/nrdot/usr/bin/nrdot-api-server
+	install -D -m 0755 bin/nrdot-privileged-helper $(CURDIR)/debian/nrdot/usr/bin/nrdot-privileged-helper
+	
+	# Install systemd units
+	install -D -m 0644 systemd/services/nrdot-collector.service $(CURDIR)/debian/nrdot/lib/systemd/system/nrdot-collector.service
+	install -D -m 0644 systemd/services/nrdot-supervisor.service $(CURDIR)/debian/nrdot/lib/systemd/system/nrdot-supervisor.service
+	install -D -m 0644 systemd/services/nrdot-config-engine.service $(CURDIR)/debian/nrdot/lib/systemd/system/nrdot-config-engine.service
+	install -D -m 0644 systemd/services/nrdot-api-server.service $(CURDIR)/debian/nrdot/lib/systemd/system/nrdot-api-server.service
+	install -D -m 0644 systemd/services/nrdot-privileged-helper.service $(CURDIR)/debian/nrdot/lib/systemd/system/nrdot-privileged-helper.service
+	install -D -m 0644 systemd/services/nrdot-api.socket $(CURDIR)/debian/nrdot/lib/systemd/system/nrdot-api.socket
+	install -D -m 0644 systemd/services/nrdot-privileged.socket $(CURDIR)/debian/nrdot/lib/systemd/system/nrdot-privileged.socket
+	install -D -m 0644 systemd/services/nrdot.target $(CURDIR)/debian/nrdot/lib/systemd/system/nrdot.target
+	
+	# Install configuration files
+	install -D -m 0644 systemd/configs/nrdot.conf $(CURDIR)/debian/nrdot/etc/nrdot/nrdot.conf
+	install -D -m 0644 systemd/configs/sysctl.d/99-nrdot.conf $(CURDIR)/debian/nrdot/etc/sysctl.d/99-nrdot.conf
+	install -D -m 0644 systemd/configs/limits.d/nrdot.conf $(CURDIR)/debian/nrdot/etc/security/limits.d/nrdot.conf
+	
+	# Install scripts
+	install -D -m 0755 systemd/scripts/health-check.sh $(CURDIR)/debian/nrdot/usr/share/nrdot/health-check.sh
+	
+	# Create directories
+	install -d -m 0750 $(CURDIR)/debian/nrdot/etc/nrdot/certs
+	install -d -m 0770 $(CURDIR)/debian/nrdot/etc/nrdot/generated
+	install -d -m 0750 $(CURDIR)/debian/nrdot/var/lib/nrdot
+	install -d -m 0750 $(CURDIR)/debian/nrdot/var/log/nrdot
+	install -d -m 0750 $(CURDIR)/debian/nrdot/var/cache/nrdot
+
+override_dh_installsystemd:
+	dh_installsystemd --name=nrdot-collector
+	dh_installsystemd --name=nrdot-supervisor
+	dh_installsystemd --name=nrdot-config-engine
+	dh_installsystemd --name=nrdot-api-server
+	dh_installsystemd --name=nrdot-privileged-helper
+	dh_installsystemd --name=nrdot-api --no-enable
+	dh_installsystemd --name=nrdot-privileged --no-enable
+	dh_installsystemd --name=nrdot
+
+override_dh_auto_test:
+	# Skip tests during package build
+
+override_dh_clean:
+	dh_clean
+	rm -rf .cache

@@ -1,0 +1,263 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nrdot-host
+  namespace: nrdot-system
+  labels:
+    app: nrdot-host
+    version: v1
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nrdot-host
+  template:
+    metadata:
+      labels:
+        app: nrdot-host
+        version: v1
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: nrdot-host
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - nrdot-host
+              topologyKey: kubernetes.io/hostname
+      containers:
+      - name: nrdot-host
+        image: nrdot/nrdot-host:latest
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        - name: health
+          containerPort: 8081
+          protocol: TCP
+        - name: metrics
+          containerPort: 9090
+          protocol: TCP
+        - name: grpc
+          containerPort: 9090
+          protocol: TCP
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: CLUSTER_NAME
+          value: "production"
+        - name: LOG_LEVEL
+          value: "info"
+        - name: MEMORY_LIMIT
+          valueFrom:
+            resourceFieldRef:
+              containerName: nrdot-host
+              resource: limits.memory
+        - name: AWS_REGION
+          value: "us-east-1"
+        - name: S3_BUCKET
+          value: "nrdot-events-archive"
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: redis-secret
+              key: password
+        envFrom:
+        - configMapRef:
+            name: nrdot-env-config
+        - secretRef:
+            name: nrdot-secrets
+        volumeMounts:
+        - name: config
+          mountPath: /etc/nrdot
+          readOnly: true
+        - name: cache
+          mountPath: /cache
+        livenessProbe:
+          httpGet:
+            path: /health/live
+            port: health
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: health
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1000m"
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+      volumes:
+      - name: config
+        configMap:
+          name: nrdot-config
+      - name: cache
+        emptyDir:
+          sizeLimit: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nrdot-host
+  namespace: nrdot-system
+  labels:
+    app: nrdot-host
+spec:
+  type: ClusterIP
+  ports:
+  - name: http
+    port: 80
+    targetPort: http
+    protocol: TCP
+  - name: grpc
+    port: 9090
+    targetPort: grpc
+    protocol: TCP
+  selector:
+    app: nrdot-host
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nrdot-host-headless
+  namespace: nrdot-system
+  labels:
+    app: nrdot-host
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+  - name: http
+    port: 8080
+    targetPort: http
+  - name: grpc
+    port: 9090
+    targetPort: grpc
+  selector:
+    app: nrdot-host
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: nrdot-host
+  namespace: nrdot-system
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: nrdot-host
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  - type: Pods
+    pods:
+      metric:
+        name: events_processing_rate
+      target:
+        type: AverageValue
+        averageValue: "1000"
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 10
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+      - type: Pods
+        value: 2
+        periodSeconds: 60
+      selectPolicy: Max
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: nrdot-host
+  namespace: nrdot-system
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: nrdot-host
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nrdot-host
+  namespace: nrdot-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: nrdot-host
+  namespace: nrdot-system
+rules:
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "watch", "create", "update", "patch"]
+- apiGroups: ["coordination.k8s.io"]
+  resources: ["leases"]
+  verbs: ["get", "list", "watch", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: nrdot-host
+  namespace: nrdot-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: nrdot-host
+subjects:
+- kind: ServiceAccount
+  name: nrdot-host
+  namespace: nrdot-system

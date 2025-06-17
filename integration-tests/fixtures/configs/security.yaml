@@ -1,0 +1,97 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  # Secret redaction processor
+  attributes:
+    actions:
+      - key: password
+        action: update
+        value: "***REDACTED***"
+      - key: api_key
+        action: update
+        value: "***REDACTED***"
+      - key: token
+        action: update
+        value: "***REDACTED***"
+      - key: secret
+        action: update
+        value: "***REDACTED***"
+      - key: database_password
+        action: update
+        value: "***REDACTED***"
+      - key: auth_token
+        action: update
+        value: "***REDACTED***"
+      - key: AWS_SECRET_ACCESS_KEY
+        action: update
+        value: "***REDACTED***"
+      - key: PRIVATE_KEY
+        action: delete
+
+  # Redact sensitive patterns in logs
+  transform:
+    log_statements:
+      - context: log
+        statements:
+          - set(body, replace_pattern(body, "password\\s*=\\s*\\S+", "password=***REDACTED***"))
+          - set(body, replace_pattern(body, "api_key\\s*=\\s*\\S+", "api_key=***REDACTED***"))
+          - set(body, replace_pattern(body, "token\\s*=\\s*\\S+", "token=***REDACTED***"))
+          - set(body, replace_pattern(body, "\\b(?:\\d{4}[\\s-]?){3}\\d{4}\\b", "***CREDIT_CARD***"))
+          - set(body, replace_pattern(body, "\\b\\d{3}-\\d{2}-\\d{4}\\b", "***SSN***"))
+
+exporters:
+  logging:
+    loglevel: info
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+  otlp:
+    endpoint: mock-backend:4317
+    tls:
+      insecure: true
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, attributes, batch]
+      exporters: [logging, otlp]
+    
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, attributes, batch]
+      exporters: [logging, otlp]
+    
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, transform, attributes, batch]
+      exporters: [logging, otlp]
+
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888
+
+  extensions: [health_check]
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+    path: "/health"

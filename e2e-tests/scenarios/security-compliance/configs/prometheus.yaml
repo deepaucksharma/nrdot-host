@@ -1,0 +1,16 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'nrdot-security'
+    static_configs:
+      - targets: ['nrdot:8888']
+        labels:
+          component: 'nrdot'
+          
+  - job_name: 'nrdot-internal'
+    static_configs:
+      - targets: ['nrdot:8889']
+        labels:
+          component: 'nrdot-telemetry'

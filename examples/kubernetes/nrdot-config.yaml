@@ -1,0 +1,207 @@
+# Kubernetes-optimized NRDOT-HOST Configuration
+# Designed for scalable, production deployments
+
+# Server configuration
+server:
+  host: "0.0.0.0"
+  port: 8080
+  log_level: "${LOG_LEVEL:info}"
+  graceful_shutdown_timeout: "30s"
+
+# API configuration  
+api:
+  enabled: true
+  cors:
+    enabled: true
+    origins: ["https://*.example.com"]
+  rate_limit:
+    enabled: true
+    requests_per_minute: 1000
+    backend: "redis"
+    redis:
+      address: "redis-service:6379"
+
+# Data sources
+sources:
+  - name: "kafka-stream"
+    type: "kafka"
+    config:
+      brokers: 
+        - "kafka-0.kafka-headless:9092"
+        - "kafka-1.kafka-headless:9092"
+        - "kafka-2.kafka-headless:9092"
+      topics: ["events", "transactions", "logs"]
+      consumer_group: "nrdot-${POD_NAME}"
+      auto_offset_reset: "earliest"
+      enable_auto_commit: true
+      session_timeout: "30s"
+      max_poll_records: 500
+  
+  - name: "grpc-ingress"
+    type: "grpc"
+    config:
+      port: 9090
+      max_message_size: "4MB"
+      keepalive:
+        time: "30s"
+        timeout: "10s"
+
+# Processing pipeline
+processors:
+  - name: "rate-limiter"
+    type: "rate_limit"
+    config:
+      max_events_per_second: 10000
+      burst_size: 1000
+      
+  - name: "deduplicator"
+    type: "dedupe"
+    config:
+      cache_backend: "redis"
+      redis:
+        address: "redis-service:6379"
+        ttl: "300s"
+      key_fields: ["id", "source"]
+  
+  - name: "validator"
+    type: "validate"
+    config:
+      schema_registry:
+        url: "http://schema-registry:8081"
+        cache_ttl: "5m"
+  
+  - name: "enricher"
+    type: "enrich"
+    config:
+      enrichments:
+        - source: "http"
+          url: "http://metadata-service/api/v1/enrich"
+          cache_ttl: "60s"
+        - source: "static"
+          fields:
+            cluster: "${CLUSTER_NAME}"
+            pod: "${POD_NAME}"
+            namespace: "${POD_NAMESPACE}"
+  
+  - name: "transformer"
+    type: "transform"
+    config:
+      parallel: true
+      workers: 4
+      mapping:
+        id: "$.event_id"
+        timestamp: "$.event_time"
+        source: "$.metadata.source"
+        data: "$.payload"
+
+# Output destinations
+outputs:
+  - name: "elasticsearch"
+    type: "elasticsearch"
+    config:
+      hosts: 
+        - "http://elasticsearch-master:9200"
+      index: "nrdot-events-${date:yyyy.MM.dd}"
+      bulk_size: 5000
+      flush_interval: "5s"
+      retry_on_conflict: 3
+      sniff: true
+      healthcheck:
+        enabled: true
+        interval: "30s"
+  
+  - name: "s3-archive"
+    type: "s3"
+    config:
+      bucket: "${S3_BUCKET}"
+      region: "${AWS_REGION}"
+      prefix: "events/${date:yyyy/MM/dd}/"
+      format: "parquet"
+      compression: "snappy"
+      batch_size: 10000
+      batch_timeout: "60s"
+      
+  - name: "monitoring"
+    type: "prometheus"
+    config:
+      pushgateway_url: "http://prometheus-pushgateway:9091"
+      job: "nrdot_host"
+      push_interval: "10s"
+
+# Distributed coordination
+coordination:
+  backend: "kubernetes"
+  config:
+    namespace: "${POD_NAMESPACE}"
+    leader_election:
+      enabled: true
+      lease_duration: "15s"
+      renew_deadline: "10s"
+      retry_period: "2s"
+
+# Caching configuration
+cache:
+  backend: "redis"
+  redis:
+    address: "redis-service:6379"
+    password: "${REDIS_PASSWORD}"
+    db: 0
+    pool_size: 10
+    max_retries: 3
+
+# Metrics and monitoring
+metrics:
+  enabled: true
+  endpoint: "/metrics"
+  port: 9090
+  collectors:
+    - "golang"
+    - "process"
+    - "custom"
+  custom_metrics:
+    - name: "events_processed_total"
+      type: "counter"
+      help: "Total number of events processed"
+    - name: "processing_duration_seconds"
+      type: "histogram"
+      help: "Event processing duration"
+
+# Health checks
+health:
+  enabled: true
+  endpoint: "/health"
+  port: 8081
+  liveness:
+    initial_delay: "30s"
+    period: "10s"
+    timeout: "5s"
+    failure_threshold: 3
+  readiness:
+    initial_delay: "10s"
+    period: "5s"
+    timeout: "3s"
+    failure_threshold: 2
+
+# Resource management
+resources:
+  max_goroutines: 1000
+  max_memory: "${MEMORY_LIMIT:4GB}"
+  gc_percent: 40
+  
+# Circuit breaker
+circuit_breaker:
+  enabled: true
+  failure_threshold: 5
+  success_threshold: 2
+  timeout: "30s"
+  
+# Tracing
+tracing:
+  enabled: true
+  backend: "jaeger"
+  jaeger:
+    endpoint: "http://jaeger-collector:14268/api/traces"
+    service_name: "nrdot-host"
+    sampler:
+      type: "probabilistic"
+      param: 0.1

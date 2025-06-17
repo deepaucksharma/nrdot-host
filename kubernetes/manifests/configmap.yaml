@@ -1,0 +1,324 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nrdot-config
+  namespace: nrdot-system
+  labels:
+    app.kubernetes.io/name: nrdot
+    app.kubernetes.io/component: configuration
+    app.kubernetes.io/part-of: nrdot-host
+data:
+  nrdot-config.yaml: |
+    # NRDOT Main Configuration
+    global:
+      deployment_environment: kubernetes
+      log_level: info
+      metrics_enabled: true
+      tracing_enabled: true
+      
+    # Telemetry Collection Configuration
+    telemetry:
+      collection_interval: 30s
+      batch_size: 1000
+      queue_size: 10000
+      timeout: 30s
+      retry:
+        enabled: true
+        initial_interval: 5s
+        max_interval: 300s
+        max_elapsed_time: 900s
+      
+    # Security Configuration  
+    security:
+      tls:
+        enabled: true
+        cert_file: /etc/nrdot/certs/tls.crt
+        key_file: /etc/nrdot/certs/tls.key
+        ca_file: /etc/nrdot/certs/ca.crt
+        min_version: "1.2"
+      authentication:
+        enabled: true
+        type: token
+        token_header: "X-NRDOT-Auth-Token"
+      data_redaction:
+        enabled: true
+        patterns:
+          - name: credit_card
+            pattern: '\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b'
+            replacement: "[REDACTED-CC]"
+          - name: ssn
+            pattern: '\b\d{3}-\d{2}-\d{4}\b'
+            replacement: "[REDACTED-SSN]"
+          - name: email
+            pattern: '\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+            replacement: "[REDACTED-EMAIL]"
+            
+    # Cardinality Control
+    cardinality:
+      enabled: true
+      limits:
+        - metric_name: "*"
+          max_cardinality: 100000
+          action: drop_new
+        - metric_name: "http_*"
+          max_cardinality: 50000
+          action: aggregate
+          
+    # Enrichment Rules
+    enrichment:
+      metadata:
+        - source: kubernetes
+          target_attributes:
+            - k8s.namespace.name
+            - k8s.pod.name
+            - k8s.deployment.name
+            - k8s.node.name
+            - k8s.cluster.name
+        - source: environment
+          mappings:
+            CLUSTER_NAME: k8s.cluster.name
+            REGION: cloud.region
+            ENVIRONMENT: deployment.environment
+            
+    # Transformation Rules
+    transformations:
+      metrics:
+        - type: aggregate
+          match: "container_*"
+          group_by: ["k8s.namespace.name", "k8s.pod.name"]
+          interval: 60s
+        - type: rate
+          match: "*_total"
+          unit: "per_second"
+          
+    # Export Configuration
+    exporters:
+      newrelic:
+        enabled: true
+        endpoint: "otlp.nr-data.net:4317"
+        compression: gzip
+        timeout: 30s
+        retry_on_failure:
+          enabled: true
+          initial_interval: 5s
+          max_interval: 300s
+      prometheus:
+        enabled: true
+        endpoint: "0.0.0.0:8888"
+        namespace: nrdot
+        
+  otelcol-config.yaml: |
+    # OpenTelemetry Collector Configuration
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+            max_recv_msg_size_mib: 32
+          http:
+            endpoint: 0.0.0.0:4318
+            cors:
+              allowed_origins:
+                - "*"
+              allowed_headers:
+                - "*"
+      prometheus:
+        config:
+          scrape_configs:
+            - job_name: 'nrdot-internal'
+              scrape_interval: 30s
+              static_configs:
+                - targets: ['localhost:8888']
+      hostmetrics:
+        collection_interval: 30s
+        scrapers:
+          cpu:
+            metrics:
+              system.cpu.utilization:
+                enabled: true
+          memory:
+            metrics:
+              system.memory.utilization:
+                enabled: true
+          load:
+          disk:
+          filesystem:
+            metrics:
+              system.filesystem.utilization:
+                enabled: true
+          network:
+          paging:
+          processes:
+      k8s_cluster:
+        auth_type: serviceAccount
+        node_conditions_to_report: ["Ready", "MemoryPressure", "DiskPressure"]
+        allocatable_types_to_report: ["cpu", "memory", "storage"]
+        
+    processors:
+      batch:
+        send_batch_size: 1000
+        send_batch_max_size: 2000
+        timeout: 10s
+      memory_limiter:
+        check_interval: 5s
+        limit_percentage: 80
+        spike_limit_percentage: 25
+      k8sattributes:
+        auth_type: serviceAccount
+        passthrough: false
+        extract:
+          metadata:
+            - k8s.namespace.name
+            - k8s.pod.name
+            - k8s.pod.uid
+            - k8s.deployment.name
+            - k8s.replicaset.name
+            - k8s.daemonset.name
+            - k8s.statefulset.name
+            - k8s.job.name
+            - k8s.cronjob.name
+            - k8s.node.name
+            - k8s.cluster.uid
+          annotations:
+            - tag_name: app
+              key: app.kubernetes.io/name
+            - tag_name: component
+              key: app.kubernetes.io/component
+            - tag_name: version
+              key: app.kubernetes.io/version
+          labels:
+            - tag_name: team
+              key: team
+            - tag_name: environment
+              key: environment
+        pod_association:
+          - sources:
+              - from: resource_attribute
+                name: k8s.pod.ip
+          - sources:
+              - from: resource_attribute
+                name: k8s.pod.uid
+          - sources:
+              - from: connection
+      nrcap:
+        enabled: true
+        limits:
+          - metric_name: "*"
+            max_cardinality: 100000
+            action: drop_new
+      nrenrich:
+        metadata:
+          - source: kubernetes
+            target_attributes:
+              - k8s.namespace.name
+              - k8s.pod.name
+              - k8s.deployment.name
+      nrsecurity:
+        enabled: true
+        redaction_patterns:
+          - name: credit_card
+            pattern: '\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b'
+            replacement: "[REDACTED-CC]"
+      nrtransform:
+        metric_transformations:
+          - type: aggregate
+            match: "container_*"
+            group_by: ["k8s.namespace.name", "k8s.pod.name"]
+            interval: 60s
+      resource:
+        attributes:
+          - key: service.name
+            value: nrdot-collector
+            action: upsert
+          - key: service.namespace
+            value: nrdot-system
+            action: upsert
+          - key: deployment.environment
+            from_attribute: DEPLOYMENT_ENV
+            action: insert
+            
+    exporters:
+      otlp/newrelic:
+        endpoint: "${NEW_RELIC_OTLP_ENDPOINT}"
+        compression: gzip
+        headers:
+          api-key: "${NEW_RELIC_LICENSE_KEY}"
+        sending_queue:
+          enabled: true
+          num_consumers: 10
+          queue_size: 1000
+        retry_on_failure:
+          enabled: true
+          initial_interval: 5s
+          randomization_factor: 0.5
+          multiplier: 1.5
+          max_interval: 300s
+          max_elapsed_time: 900s
+      prometheus:
+        endpoint: "0.0.0.0:8888"
+        namespace: nrdot
+        const_labels:
+          service: nrdot
+      logging:
+        loglevel: info
+        
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+        path: /health
+        check_collector_pipeline:
+          enabled: true
+          interval: 5m
+          exporter_failure_threshold: 5
+      zpages:
+        endpoint: 0.0.0.0:55679
+      pprof:
+        endpoint: localhost:1888
+        
+    service:
+      telemetry:
+        logs:
+          level: info
+        metrics:
+          level: detailed
+          address: 0.0.0.0:8888
+      extensions: [health_check, zpages, pprof]
+      pipelines:
+        metrics:
+          receivers: [otlp, prometheus, hostmetrics, k8s_cluster]
+          processors: [memory_limiter, k8sattributes, nrcap, nrenrich, nrsecurity, nrtransform, resource, batch]
+          exporters: [otlp/newrelic, prometheus, logging]
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, k8sattributes, nrenrich, nrsecurity, resource, batch]
+          exporters: [otlp/newrelic, logging]
+        logs:
+          receivers: [otlp]
+          processors: [memory_limiter, k8sattributes, nrenrich, nrsecurity, resource, batch]
+          exporters: [otlp/newrelic, logging]
+          
+  supervisor.yaml: |
+    # Supervisor Configuration
+    mode: kubernetes
+    health_check:
+      enabled: true
+      port: 8081
+      path: /health
+    restart_policy:
+      strategy: exponential
+      max_restarts: 5
+      initial_delay: 5s
+      max_delay: 300s
+    managed_processes:
+      - name: collector
+        enabled: false  # In K8s, collector runs as separate deployment
+      - name: config-engine
+        enabled: false  # In K8s, config-engine runs as separate deployment
+    kubernetes:
+      namespace: nrdot-system
+      service_account: nrdot-supervisor
+      watch_resources:
+        - deployments
+        - daemonsets
+        - statefulsets
+      label_selector: "app.kubernetes.io/part-of=nrdot-host"

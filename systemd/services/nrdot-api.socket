@@ -1,0 +1,17 @@
+[Unit]
+Description=NRDOT API Server Socket
+Documentation=https://github.com/NRDOT/nrdot-host
+
+[Socket]
+ListenStream=0.0.0.0:8080
+ListenStream=[::]:8080
+BindIPv6Only=both
+Backlog=1024
+NoDelay=true
+ReusePort=true
+SocketMode=0660
+SocketUser=nrdot
+SocketGroup=nrdot
+
+[Install]
+WantedBy=sockets.target
