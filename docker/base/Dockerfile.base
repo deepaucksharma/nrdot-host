@@ -79,7 +79,7 @@ LABEL maintainer="New Relic NRDOT Team <nrdot@newrelic.com>" \
       org.opencontainers.image.source="https://github.com/newrelic/nrdot-host"
 
 # Golang builder base
-FROM golang:1.21-alpine AS golang-base
+FROM golang:1.24-alpine AS golang-base
 
 # Install build dependencies
 RUN apk add --no-cache \
