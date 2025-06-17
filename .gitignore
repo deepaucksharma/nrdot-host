@@ -1,0 +1,148 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Go workspace file
+go.work
+
+# Dependency directories
+vendor/
+
+# Go build cache
+.cache/
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Build artifacts
+bin/
+dist/
+build/
+*.rpm
+*.deb
+*.msi
+*.tar.gz
+*.zip
+
+# Component-specific binaries
+nrdot-ctl/nrdot-ctl
+nrdot-config-engine/config-engine
+nrdot-supervisor/supervisor
+nrdot-api-server/nrdot-api-server
+nrdot-privileged-helper/nrdot-privileged-helper
+*/bin/
+
+# Test artifacts
+coverage.txt
+coverage.html
+*.coverprofile
+test-results/
+junit-report.xml
+
+# Configuration files with secrets
+**/config.yaml
+**/config.yml
+!examples/*.yml
+!examples/*.yaml
+!**/example-config.yaml
+!**/test-config.yaml
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+*.pid
+/tmp/
+
+# Generated files
+generated/
+output/
+
+# Docker artifacts
+.dockerignore
+docker-compose.override.yml
+
+# Kubernetes artifacts
+*.kubeconfig
+charts/**/values-*.yaml
+
+# Local development
+.env
+.env.local
+.env.*.local
+
+# Certificates
+*.pem
+*.key
+*.crt
+*.csr
+
+# OS specific
+Thumbs.db
+
+# Python cache (for any Python scripts)
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Terraform (if used for infrastructure)
+*.tfstate
+*.tfstate.*
+.terraform/
+
+# Ansible (if used)
+*.retry
+
+# Integration test outputs
+integration-tests/results/
+integration-tests/logs/
+
+# E2E test outputs
+e2e-tests/results/
+e2e-tests/screenshots/
+
+# OTel Collector build artifacts
+otelcol-builder/dist/
+otelcol-builder/otelcol-custom
+otelcol-builder/.cache/
+
+# Guardian fleet data
+guardian-fleet-infra/data/
+guardian-fleet-infra/logs/
+
+# Benchmark results
+benchmark-results/
+*.bench
+
+# Local notes and scratch files
+NOTES.md
+TODO.md
+scratch/
+
+# License key files (security)
+license.key
+*.lic
+
+# Prometheus data
+prometheus-data/
+
+# Grafana data  
+grafana-data/
+
+# Local systemd units (for testing)
+*.service
+!nrdot-supervisor/nrdot-supervisor.service
