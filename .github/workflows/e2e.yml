@@ -39,7 +39,7 @@ jobs:
 
     - name: Upload test results
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: e2e-microservices-results
         path: e2e-tests/reports/
@@ -71,7 +71,7 @@ jobs:
 
     - name: Upload test results
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: e2e-security-results
         path: e2e-tests/reports/
@@ -103,7 +103,7 @@ jobs:
 
     - name: Upload test results
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: e2e-cardinality-results
         path: e2e-tests/reports/

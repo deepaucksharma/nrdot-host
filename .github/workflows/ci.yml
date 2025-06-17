@@ -81,7 +81,7 @@ jobs:
         go tool cover -html=coverage.out -o coverage.html
 
     - name: Upload coverage
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: coverage-${{ matrix.component }}
         path: ${{ matrix.component }}/coverage.html
@@ -111,7 +111,7 @@ jobs:
       run: make build
 
     - name: Upload binaries
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: binaries
         path: bin/
@@ -209,7 +209,7 @@ jobs:
       run: make benchmark
 
     - name: Upload benchmark results
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: benchmarks
         path: '**/bench.txt'
