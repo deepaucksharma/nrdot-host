@@ -1,0 +1,408 @@
+# Cell Routing Configuration for Clean Platform
+# Implements multi-cell deployment with intelligent routing
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cell-routing-config
+  namespace: clean-platform
+data:
+  routing-rules.yaml: |
+    # Cell routing configuration
+    cells:
+      - name: us-core-ops
+        region: us-east-1
+        priority: 1
+        capacity:
+          max_rps: 7000
+          max_connections: 10000
+        health_check:
+          endpoint: /healthz
+          interval: 10s
+          timeout: 5s
+        routing_weights:
+          default: 60
+          overflow: 40
+        
+      - name: us-alt-mule
+        region: us-west-2
+        priority: 2
+        capacity:
+          max_rps: 5000
+          max_connections: 8000
+        health_check:
+          endpoint: /healthz
+          interval: 10s
+          timeout: 5s
+        routing_weights:
+          default: 40
+          overflow: 60
+    
+    # Routing strategies
+    routing_strategies:
+      - name: latency_based
+        description: Route based on lowest latency
+        enabled: true
+        
+      - name: capacity_based
+        description: Route based on available capacity
+        enabled: true
+        thresholds:
+          cpu_utilization: 70
+          memory_utilization: 80
+          request_rate_percentage: 80
+          
+      - name: geo_proximity
+        description: Route to nearest cell
+        enabled: true
+        
+      - name: failover
+        description: Automatic failover on cell failure
+        enabled: true
+        detection_time: 30s
+        
+    # Traffic management
+    traffic_management:
+      circuit_breaker:
+        error_threshold: 50
+        timeout: 30s
+        half_open_requests: 10
+        
+      rate_limiting:
+        enabled: true
+        default_rps: 1000
+        burst: 2000
+        
+      retry_policy:
+        max_attempts: 3
+        backoff: exponential
+        base_delay: 100ms
+        max_delay: 2s
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cell-router
+  namespace: clean-platform
+  labels:
+    app: cell-router
+    component: routing
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: cell-router
+  template:
+    metadata:
+      labels:
+        app: cell-router
+        component: routing
+    spec:
+      serviceAccountName: cell-router
+      
+      # Anti-affinity for HA
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - cell-router
+            topologyKey: kubernetes.io/hostname
+      
+      containers:
+      - name: router
+        image: cf-registry.nr-ops.net/platform-team/cell-router:latest
+        
+        ports:
+        - name: http
+          containerPort: 8080
+        - name: metrics
+          containerPort: 9090
+        
+        env:
+        - name: ENVIRONMENT
+          value: "production"
+        - name: LOG_LEVEL
+          value: "info"
+        - name: CONFIG_PATH
+          value: "/config/routing-rules.yaml"
+        
+        # Cell discovery via Grand Central
+        - name: GRAND_CENTRAL_URL
+          value: "https://grand-central.nr-ops.net"
+        - name: GRAND_CENTRAL_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: grand-central-credentials
+              key: token
+        
+        # Service discovery
+        - name: BIOSECURITY_ENABLED
+          value: "true"
+        - name: VAULT_ADDR
+          value: "https://vault-prd1a.r10.us.nr-ops.net:8200"
+        - name: VAULT_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: vault-credentials
+              key: token
+        
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: 1000m
+            memory: 1Gi
+        
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        
+        volumeMounts:
+        - name: config
+          mountPath: /config
+          readOnly: true
+        - name: cache
+          mountPath: /cache
+      
+      volumes:
+      - name: config
+        configMap:
+          name: cell-routing-config
+      - name: cache
+        emptyDir:
+          sizeLimit: 1Gi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cell-router
+  namespace: clean-platform
+  labels:
+    app: cell-router
+spec:
+  type: ClusterIP
+  selector:
+    app: cell-router
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+  - name: metrics
+    port: 9090
+    targetPort: 9090
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cell-router
+  namespace: clean-platform
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cell-router
+  namespace: clean-platform
+rules:
+- apiGroups: [""]
+  resources: ["endpoints", "services"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "list"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cell-router
+  namespace: clean-platform
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cell-router
+subjects:
+- kind: ServiceAccount
+  name: cell-router
+  namespace: clean-platform
+
+---
+# IngressDomain configuration for cell routing
+apiVersion: networking.newrelic.com/v1
+kind: IngressDomain
+metadata:
+  name: clean-platform-cell-routing
+  namespace: clean-platform
+spec:
+  domain: clean-platform.nr-ops.net
+  
+  routing:
+    - path: /
+      priority: 100
+      backend:
+        service: cell-router
+        port: 80
+      
+      # Cell-aware routing
+      cellRouting:
+        enabled: true
+        strategy: latency_based
+        healthCheck:
+          enabled: true
+          interval: 10s
+          timeout: 5s
+          unhealthyThreshold: 3
+      
+      # Authentication
+      authentication:
+        type: oauth2
+        provider: okta
+        allowedGroups:
+          - platform-users
+          - platform-admins
+      
+      # Circuit breaker
+      circuitBreaker:
+        enabled: true
+        errorThreshold: 50
+        timeout: 30
+        halfOpenRequests: 10
+      
+      # Rate limiting
+      rateLimit:
+        enabled: true
+        requestsPerSecond: 1000
+        burst: 2000
+        
+  # TLS configuration
+  tls:
+    enabled: true
+    secretName: clean-platform-tls-secret
+
+---
+# HorizontalPodAutoscaler for cell router
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: cell-router-hpa
+  namespace: clean-platform
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: cell-router
+  
+  minReplicas: 3
+  maxReplicas: 10
+  
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 60
+        
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 70
+        
+  - type: Pods
+    pods:
+      metric:
+        name: http_requests_per_second
+      target:
+        type: AverageValue
+        averageValue: "1000"
+  
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 10
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 30
+      - type: Pods
+        value: 2
+        periodSeconds: 60
+
+---
+# NetworkPolicy for cell router
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cell-router-network-policy
+  namespace: clean-platform
+spec:
+  podSelector:
+    matchLabels:
+      app: cell-router
+  
+  policyTypes:
+  - Ingress
+  - Egress
+  
+  ingress:
+  - from:
+    # Allow from ingress controller
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    # Allow from same namespace
+    - podSelector: {}
+    ports:
+    - protocol: TCP
+      port: 8080
+    - protocol: TCP
+      port: 9090
+  
+  egress:
+  # Allow DNS
+  - to:
+    - namespaceSelector: {}
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+  
+  # Allow to services in same namespace
+  - to:
+    - podSelector: {}
+    
+  # Allow to external services
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 80

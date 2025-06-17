@@ -1,0 +1,151 @@
+# Elasticsearch Helm Values for Platform Logging
+clusterName: "platform-elasticsearch"
+nodeGroup: "master"
+
+# Cluster configuration
+replicas: 3
+minimumMasterNodes: 2
+
+# Resource limits
+resources:
+  requests:
+    cpu: "1000m"
+    memory: "2Gi"
+  limits:
+    cpu: "2000m"
+    memory: "4Gi"
+
+# Storage
+volumeClaimTemplate:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 100Gi
+  storageClassName: gp3
+
+# JVM Options
+esJavaOpts: "-Xmx2g -Xms2g"
+
+# Security
+protocol: https
+xpackSecurity:
+  enabled: true
+  transportSSL:
+    enabled: true
+    verification_mode: certificate
+    keystore:
+      path: /usr/share/elasticsearch/config/certs/elastic-certificates.p12
+    truststore:
+      path: /usr/share/elasticsearch/config/certs/elastic-certificates.p12
+
+# Elasticsearch configuration
+esConfig:
+  elasticsearch.yml: |
+    cluster.name: platform-elasticsearch
+    node.name: ${HOSTNAME}
+    network.host: 0.0.0.0
+    discovery.seed_hosts: 
+      - elasticsearch-master-0.elasticsearch-master-headless
+      - elasticsearch-master-1.elasticsearch-master-headless
+      - elasticsearch-master-2.elasticsearch-master-headless
+    cluster.initial_master_nodes:
+      - elasticsearch-master-0
+      - elasticsearch-master-1
+      - elasticsearch-master-2
+    xpack.security.enabled: true
+    xpack.security.transport.ssl.enabled: true
+    xpack.security.transport.ssl.verification_mode: certificate
+    xpack.security.transport.ssl.keystore.path: /usr/share/elasticsearch/config/certs/elastic-certificates.p12
+    xpack.security.transport.ssl.truststore.path: /usr/share/elasticsearch/config/certs/elastic-certificates.p12
+    xpack.monitoring.collection.enabled: true
+    indices.query.bool.max_clause_count: 10000
+    # Index lifecycle management
+    xpack.ilm.enabled: true
+
+# Pod Security
+podSecurityContext:
+  fsGroup: 1000
+  runAsUser: 1000
+  runAsNonRoot: true
+
+securityContext:
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: false
+  runAsNonRoot: true
+  runAsUser: 1000
+
+# Anti-affinity rules
+antiAffinityTopologyKey: "kubernetes.io/hostname"
+antiAffinity: "hard"
+
+# Lifecycle hooks
+lifecycle:
+  preStop:
+    exec:
+      command: ["/bin/sh", "-c", "sleep 15"]
+
+# Readiness probe
+readinessProbe:
+  failureThreshold: 3
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  successThreshold: 3
+  timeoutSeconds: 5
+
+# Extra environment variables
+extraEnvs:
+  - name: ELASTIC_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: elastic-credentials
+        key: password
+  - name: ELASTIC_USERNAME
+    value: "elastic"
+
+# Persistence
+persistence:
+  enabled: true
+  labels:
+    enabled: false
+
+# Service
+service:
+  type: ClusterIP
+  annotations: {}
+
+# Ingress
+ingress:
+  enabled: false
+
+# For data nodes (separate deployment)
+---
+clusterName: "platform-elasticsearch"
+nodeGroup: "data"
+
+roles:
+  - data
+  - data_content
+  - data_hot
+  - data_warm
+  - data_cold
+
+replicas: 3
+
+resources:
+  requests:
+    cpu: "2000m"
+    memory: "4Gi"
+  limits:
+    cpu: "4000m"
+    memory: "8Gi"
+
+volumeClaimTemplate:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 500Gi
+  storageClassName: gp3
+
+esJavaOpts: "-Xmx4g -Xms4g"

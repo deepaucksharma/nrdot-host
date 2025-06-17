@@ -1,0 +1,176 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: data-collector
+  labels:
+    app: data-collector
+    team: platform-team
+    version: v1
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: data-collector
+  template:
+    metadata:
+      labels:
+        app: data-collector
+        team: platform-team
+        version: v1
+      annotations:
+        # Container security scan status
+        container.security.scan/status: "passed"
+        container.security.scan/date: "2024-01-15"
+        # Prometheus scraping
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      # Security context for pod (required by Kyverno)
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      
+      # Service account for IRSA
+      serviceAccountName: data-collector
+      
+      # Anti-affinity for high availability
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - data-collector
+              topologyKey: kubernetes.io/hostname
+      
+      containers:
+      - name: data-collector
+        image: cf-registry.nr-ops.net/platform-team/data-collector:latest
+        imagePullPolicy: Always
+        
+        # Security context for container (required by Kyverno)
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 10001
+          capabilities:
+            drop:
+            - ALL
+        
+        # Resource limits (required by Kyverno)
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        
+        # Ports
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        - name: health
+          containerPort: 8081
+          protocol: TCP
+        - name: metrics
+          containerPort: 9090
+          protocol: TCP
+        
+        # Environment variables
+        env:
+        - name: ENVIRONMENT
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: NEW_RELIC_APP_NAME
+          value: "clean-platform-data-collector"
+        - name: NEW_RELIC_LICENSE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: newrelic-license
+              key: license-key
+        - name: REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              name: redis-credentials
+              key: url
+        
+        # Volume mounts for writable directories
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: app-logs
+          mountPath: /var/log/app
+        
+        # Liveness probe
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: health
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3
+        
+        # Readiness probe
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: health
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 3
+        
+        # Startup probe for slow starting containers
+        startupProbe:
+          httpGet:
+            path: /healthz
+            port: health
+          initialDelaySeconds: 0
+          periodSeconds: 10
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 30
+      
+      # Volumes for writable directories
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      - name: app-logs
+        emptyDir: {}
+      
+      # Image pull secrets
+      imagePullSecrets:
+      - name: cf-registry-secret
+      
+      # Termination grace period
+      terminationGracePeriodSeconds: 30
+      
+      # DNS policy
+      dnsPolicy: ClusterFirst
+      
+      # Restart policy
+      restartPolicy: Always

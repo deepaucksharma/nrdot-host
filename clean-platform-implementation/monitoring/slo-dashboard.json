@@ -1,0 +1,474 @@
+{
+  "name": "Clean Platform SLO Dashboard",
+  "description": "Service Level Objectives monitoring for Clean Platform Implementation",
+  "permissions": "PUBLIC_READ_WRITE",
+  "pages": [
+    {
+      "name": "Service Level Objectives",
+      "description": "Overall SLO compliance and trends",
+      "widgets": [
+        {
+          "title": "Availability SLO (99.95%)",
+          "row": 1,
+          "column": 1,
+          "width": 4,
+          "height": 3,
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "configuration": {
+            "queries": [
+              {
+                "accountId": "${account_id}",
+                "query": "FROM Transaction SELECT percentage(count(*), WHERE response.status < 500) AS 'Availability' WHERE appName = 'clean-platform-${environment}' SINCE 7 days ago"
+              }
+            ],
+            "thresholds": [
+              {
+                "value": 99.95,
+                "alertSeverity": "CRITICAL"
+              },
+              {
+                "value": 99.99,
+                "alertSeverity": "WARNING"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Latency P99 SLO (< 100ms)",
+          "row": 1,
+          "column": 5,
+          "width": 4,
+          "height": 3,
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "configuration": {
+            "queries": [
+              {
+                "accountId": "${account_id}",
+                "query": "FROM Transaction SELECT percentile(duration * 1000, 99) AS 'P99 Latency (ms)' WHERE appName = 'clean-platform-${environment}' SINCE 7 days ago"
+              }
+            ],
+            "thresholds": [
+              {
+                "value": 100,
+                "alertSeverity": "CRITICAL"
+              },
+              {
+                "value": 80,
+                "alertSeverity": "WARNING"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Error Rate SLO (< 0.1%)",
+          "row": 1,
+          "column": 9,
+          "width": 4,
+          "height": 3,
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "configuration": {
+            "queries": [
+              {
+                "accountId": "${account_id}",
+                "query": "FROM Transaction SELECT percentage(count(*), WHERE error IS true) AS 'Error Rate' WHERE appName = 'clean-platform-${environment}' SINCE 7 days ago"
+              }
+            ],
+            "thresholds": [
+              {
+                "value": 0.1,
+                "alertSeverity": "CRITICAL"
+              },
+              {
+                "value": 0.05,
+                "alertSeverity": "WARNING"
+              }
+            ]
+          }
+        },
+        {
+          "title": "SLO Burn Rate - Availability",
+          "row": 4,
+          "column": 1,
+          "width": 6,
+          "height": 3,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "configuration": {
+            "queries": [
+              {
+                "accountId": "${account_id}",
+                "query": "FROM Transaction SELECT 100 - percentage(count(*), WHERE response.status < 500) AS 'Error Budget Burn Rate' WHERE appName = 'clean-platform-${environment}' TIMESERIES 1 hour SINCE 7 days ago"
+              }
+            ],
+            "yAxisLeft": {
+              "zero": true,
+              "max": 0.1
+            }
+          }
+        },
+        {
+          "title": "Error Budget Remaining",
+          "row": 4,
+          "column": 7,
+          "width": 6,
+          "height": 3,
+          "visualization": {
+            "id": "viz.pie"
+          },
+          "configuration": {
+            "queries": [
+              {
+                "accountId": "${account_id}",
+                "query": "SELECT 0.05 - percentage(count(*), WHERE response.status >= 500) AS 'Remaining', percentage(count(*), WHERE response.status >= 500) AS 'Consumed' FROM Transaction WHERE appName = 'clean-platform-${environment}' SINCE 28 days ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Service Availability by Cell",
+          "row": 7,
+          "column": 1,
+          "width": 12,
+          "height": 3,
+          "visualization": {
+            "id": "viz.bar"
+          },
+          "configuration": {
+            "queries": [
+              {
+                "accountId": "${account_id}",
+                "query": "FROM Transaction SELECT percentage(count(*), WHERE response.status < 500) AS 'Availability' WHERE appName = 'clean-platform-${environment}' FACET cell SINCE 7 days ago"
+              }
+            ],
+            "facet": {
+              "showOtherSeries": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Performance Metrics",
+      "description": "Detailed performance monitoring",
+      "widgets": [
+        {
+          "title": "Response Time Distribution",
+          "row": 1,
+          "column": 1,
+          "width": 6,
+          "height": 3,
+          "visualization": {
+            "id": "viz.histogram"
+          },
+          "configuration": {
+            "queries": [
+              {
+                "accountId": "${account_id}",
+                "query": "FROM Transaction SELECT histogram(duration * 1000, width: 10, buckets: 20) WHERE appName = 'clean-platform-${environment}' SINCE 1 hour ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Latency Percentiles",
+          "row": 1,
+          "column": 7,
+          "width": 6,
+          "height": 3,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "configuration": {
+            "queries": [
+              {
+                "accountId": "${account_id}",
+                "query": "FROM Transaction SELECT percentile(duration * 1000, 50) AS 'P50', percentile(duration * 1000, 95) AS 'P95', percentile(duration * 1000, 99) AS 'P99' WHERE appName = 'clean-platform-${environment}' TIMESERIES 5 minutes SINCE 1 hour ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Request Rate by Endpoint",
+          "row": 4,
+          "column": 1,
+          "width": 6,
+          "height": 3,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "configuration": {
+            "queries": [
+              {
+                "accountId": "${account_id}",
+                "query": "FROM Transaction SELECT rate(count(*), 1 minute) AS 'Requests/min' WHERE appName = 'clean-platform-${environment}' FACET request.uri TIMESERIES 5 minutes SINCE 1 hour ago"
+              }
+            ],
+            "facet": {
+              "showOtherSeries": false
+            }
+          }
+        },
+        {
+          "title": "Error Types",
+          "row": 4,
+          "column": 7,
+          "width": 6,
+          "height": 3,
+          "visualization": {
+            "id": "viz.pie"
+          },
+          "configuration": {
+            "queries": [
+              {
+                "accountId": "${account_id}",
+                "query": "FROM TransactionError SELECT count(*) WHERE appName = 'clean-platform-${environment}' FACET error.class SINCE 1 hour ago"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Infrastructure & Capacity",
+      "description": "Resource utilization and capacity metrics",
+      "widgets": [
+        {
+          "title": "CPU Utilization by Pod",
+          "row": 1,
+          "column": 1,
+          "width": 6,
+          "height": 3,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "configuration": {
+            "queries": [
+              {
+                "accountId": "${account_id}",
+                "query": "FROM K8sContainerSample SELECT average(cpuCoresUtilization) WHERE clusterName = '${cluster_name}' AND namespace = 'clean-platform-${environment}' FACET podName TIMESERIES 5 minutes SINCE 1 hour ago"
+              }
+            ],
+            "yAxisLeft": {
+              "max": 100
+            }
+          }
+        },
+        {
+          "title": "Memory Utilization by Pod",
+          "row": 1,
+          "column": 7,
+          "width": 6,
+          "height": 3,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "configuration": {
+            "queries": [
+              {
+                "accountId": "${account_id}",
+                "query": "FROM K8sContainerSample SELECT average(memoryWorkingSetUtilization) WHERE clusterName = '${cluster_name}' AND namespace = 'clean-platform-${environment}' FACET podName TIMESERIES 5 minutes SINCE 1 hour ago"
+              }
+            ],
+            "yAxisLeft": {
+              "max": 100
+            }
+          }
+        },
+        {
+          "title": "Kafka Consumer Lag",
+          "row": 4,
+          "column": 1,
+          "width": 6,
+          "height": 3,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "configuration": {
+            "queries": [
+              {
+                "accountId": "${account_id}",
+                "query": "FROM Metric SELECT max(kafka.consumer.lag) WHERE consumer_group = 'clean-platform-${environment}' FACET topic TIMESERIES 5 minutes SINCE 1 hour ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Database Connection Pool",
+          "row": 4,
+          "column": 7,
+          "width": 6,
+          "height": 3,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "configuration": {
+            "queries": [
+              {
+                "accountId": "${account_id}",
+                "query": "FROM DatastoreSample SELECT average(provider.databaseConnections.used) AS 'Used', average(provider.databaseConnections.max) AS 'Max' WHERE provider = 'PostgresDatabase' AND label.service = 'clean-platform-${environment}' TIMESERIES 5 minutes SINCE 1 hour ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Autoscaling Events",
+          "row": 7,
+          "column": 1,
+          "width": 12,
+          "height": 3,
+          "visualization": {
+            "id": "viz.table"
+          },
+          "configuration": {
+            "queries": [
+              {
+                "accountId": "${account_id}",
+                "query": "FROM K8sHpaSample SELECT timestamp, currentReplicas, desiredReplicas, targetMetric WHERE clusterName = '${cluster_name}' AND namespace = 'clean-platform-${environment}' SINCE 1 hour ago LIMIT 20"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cost & Efficiency",
+      "description": "Cost optimization and resource efficiency metrics",
+      "widgets": [
+        {
+          "title": "Resource Utilization Score",
+          "row": 1,
+          "column": 1,
+          "width": 4,
+          "height": 3,
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "configuration": {
+            "queries": [
+              {
+                "accountId": "${account_id}",
+                "query": "FROM FinopsEC2ProjectCellCostEstimation SELECT (percentile(cpu_use, 99) * 0.75 + percentile(memory_use, 99) * 0.25) AS 'Utilization Score' WHERE project = 'clean-platform-implementation' AND environment = '${environment}' SINCE 1 day ago"
+              }
+            ],
+            "thresholds": [
+              {
+                "value": 40,
+                "alertSeverity": "WARNING"
+              },
+              {
+                "value": 70,
+                "alertSeverity": "CRITICAL"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Utilization Grade",
+          "row": 1,
+          "column": 5,
+          "width": 4,
+          "height": 3,
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "configuration": {
+            "queries": [
+              {
+                "accountId": "${account_id}",
+                "query": "FROM FinopsEC2ProjectCellCostEstimation SELECT latest(utilization_grade) AS 'Grade' WHERE project = 'clean-platform-implementation' AND environment = '${environment}'"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Monthly Cost Trend",
+          "row": 1,
+          "column": 9,
+          "width": 4,
+          "height": 3,
+          "visualization": {
+            "id": "viz.line"
+          },
+          "configuration": {
+            "queries": [
+              {
+                "accountId": "${account_id}",
+                "query": "FROM FinopsEC2ProjectCellCostEstimation SELECT sum(cost_per_month) WHERE project = 'clean-platform-implementation' FACET environment TIMESERIES 1 day SINCE 30 days ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "CPU vs Memory Efficiency",
+          "row": 4,
+          "column": 1,
+          "width": 6,
+          "height": 3,
+          "visualization": {
+            "id": "viz.scatter"
+          },
+          "configuration": {
+            "queries": [
+              {
+                "accountId": "${account_id}",
+                "query": "FROM FinopsEC2ProjectCellCostEstimation SELECT average(cpu_use) AS 'CPU %', average(memory_use) AS 'Memory %' WHERE project = 'clean-platform-implementation' FACET cell, instance_type SINCE 1 day ago"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Right-Sizing Opportunities",
+          "row": 4,
+          "column": 7,
+          "width": 6,
+          "height": 3,
+          "visualization": {
+            "id": "viz.table"
+          },
+          "configuration": {
+            "queries": [
+              {
+                "accountId": "${account_id}",
+                "query": "FROM FinopsEC2ProjectCellCostEstimation SELECT instance_type, average(cpu_use) AS 'CPU %', average(memory_use) AS 'Memory %', utilization_grade WHERE project = 'clean-platform-implementation' AND utilization_grade IN ('C', 'D', 'F') FACET instance_type, cell SINCE 1 day ago"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "variables": [
+    {
+      "name": "environment",
+      "type": "NRQL",
+      "title": "Environment",
+      "query": {
+        "accountId": "${account_id}",
+        "query": "FROM Transaction SELECT uniques(environment) WHERE appName LIKE 'clean-platform%' SINCE 1 day ago"
+      },
+      "defaultValue": "production"
+    },
+    {
+      "name": "cluster_name",
+      "type": "NRQL",
+      "title": "Kubernetes Cluster",
+      "query": {
+        "accountId": "${account_id}",
+        "query": "FROM K8sContainerSample SELECT uniques(clusterName) WHERE namespace LIKE 'clean-platform%' SINCE 1 day ago"
+      }
+    },
+    {
+      "name": "account_id",
+      "type": "CONSTANT",
+      "title": "Account ID",
+      "value": "YOUR_ACCOUNT_ID"
+    }
+  ]
+}

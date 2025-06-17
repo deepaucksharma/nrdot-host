@@ -1,0 +1,312 @@
+# ArgoCD Application for Clean Platform Implementation
+# Implements GitOps deployment pattern
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: clean-platform
+  namespace: argocd
+  labels:
+    team: platform-team
+    environment: production
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: platform-team
+  
+  source:
+    repoURL: git@source.datanerd.us:platform-team/clean-platform-implementation.git
+    targetRevision: main
+    path: k8s/overlays/production
+    
+    # Kustomize specific config
+    kustomize:
+      namePrefix: prod-
+      commonLabels:
+        environment: production
+        managed-by: argocd
+      images:
+        - cf-registry.nr-ops.net/platform-team/data-collector:latest
+        - cf-registry.nr-ops.net/platform-team/data-processor:latest
+        - cf-registry.nr-ops.net/platform-team/api-gateway:latest
+  
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: clean-platform
+  
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    
+    syncOptions:
+    - CreateNamespace=true
+    - PrunePropagationPolicy=foreground
+    - PruneLast=true
+    - RespectIgnoreDifferences=true
+    - ApplyOutOfSyncOnly=true
+    
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+  
+  # Ignore differences for generated fields
+  ignoreDifferences:
+  - group: apps
+    kind: Deployment
+    jsonPointers:
+    - /spec/replicas
+  - group: autoscaling
+    kind: HorizontalPodAutoscaler
+    jsonPointers:
+    - /status
+  
+  # Health checks
+  health:
+    progressDeadlineSeconds: 600
+  
+  # Notifications
+  notifications:
+    annotations:
+      notifications.argoproj.io/subscribe.on-deployed.slack: platform-alerts
+      notifications.argoproj.io/subscribe.on-health-degraded.slack: platform-critical
+      notifications.argoproj.io/subscribe.on-sync-failed.slack: platform-critical
+
+---
+# Staging Environment
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: clean-platform-staging
+  namespace: argocd
+  labels:
+    team: platform-team
+    environment: staging
+spec:
+  project: platform-team
+  
+  source:
+    repoURL: git@source.datanerd.us:platform-team/clean-platform-implementation.git
+    targetRevision: develop
+    path: k8s/overlays/staging
+    
+    kustomize:
+      namePrefix: staging-
+      commonLabels:
+        environment: staging
+        managed-by: argocd
+  
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: clean-platform-staging
+  
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    
+    syncOptions:
+    - CreateNamespace=true
+    
+    retry:
+      limit: 3
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 1m
+
+---
+# Development Environment
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: clean-platform-dev
+  namespace: argocd
+  labels:
+    team: platform-team
+    environment: development
+spec:
+  project: platform-team
+  
+  source:
+    repoURL: git@source.datanerd.us:platform-team/clean-platform-implementation.git
+    targetRevision: develop
+    path: k8s/overlays/dev
+    
+    kustomize:
+      namePrefix: dev-
+      commonLabels:
+        environment: development
+        managed-by: argocd
+  
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: clean-platform-dev
+  
+  syncPolicy:
+    # Manual sync for dev
+    automated: false
+    
+    syncOptions:
+    - CreateNamespace=true
+
+---
+# AppProject for Platform Team
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: platform-team
+  namespace: argocd
+spec:
+  description: Platform Team applications
+  
+  # Source repos
+  sourceRepos:
+  - 'git@source.datanerd.us:platform-team/*'
+  
+  # Destinations
+  destinations:
+  - namespace: 'clean-platform*'
+    server: https://kubernetes.default.svc
+  - namespace: 'platform-*'
+    server: https://kubernetes.default.svc
+  
+  # Cluster resource whitelist
+  clusterResourceWhitelist:
+  - group: ''
+    kind: Namespace
+  - group: 'rbac.authorization.k8s.io'
+    kind: ClusterRole
+  - group: 'rbac.authorization.k8s.io'
+    kind: ClusterRoleBinding
+  
+  # Namespace resource whitelist
+  namespaceResourceWhitelist:
+  - group: '*'
+    kind: '*'
+  
+  # Roles
+  roles:
+  - name: platform-admin
+    policies:
+    - p, proj:platform-team:platform-admin, applications, *, platform-team/*, allow
+    - p, proj:platform-team:platform-admin, repositories, *, *, allow
+    groups:
+    - platform-team:admins
+  
+  - name: platform-developer
+    policies:
+    - p, proj:platform-team:platform-developer, applications, get, platform-team/*, allow
+    - p, proj:platform-team:platform-developer, applications, sync, platform-team/*, allow
+    groups:
+    - platform-team:developers
+
+---
+# ApplicationSet for multi-cell deployment
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: clean-platform-cells
+  namespace: argocd
+spec:
+  generators:
+  - list:
+      elements:
+      - cluster: us-core-ops
+        cell: us-core-ops
+        region: us-east-1
+      - cluster: us-alt-mule
+        cell: us-alt-mule
+        region: us-west-2
+  
+  template:
+    metadata:
+      name: 'clean-platform-{{cell}}'
+      labels:
+        cell: '{{cell}}'
+        region: '{{region}}'
+    spec:
+      project: platform-team
+      
+      source:
+        repoURL: git@source.datanerd.us:platform-team/clean-platform-implementation.git
+        targetRevision: main
+        path: k8s/overlays/production
+        
+        kustomize:
+          namePrefix: '{{cell}}-'
+          commonLabels:
+            cell: '{{cell}}'
+            region: '{{region}}'
+      
+      destination:
+        server: '{{cluster}}'
+        namespace: clean-platform
+      
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        
+        syncOptions:
+        - CreateNamespace=true
+
+---
+# Notification ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-notifications-cm
+  namespace: argocd
+data:
+  service.slack: |
+    token: $slack-token
+  
+  template.app-deployed: |
+    message: |
+      Application {{.app.metadata.name}} is now running new version.
+      {{if ne .serviceType "slack"}}
+      Application details: {{.context.argocdUrl}}/applications/{{.app.metadata.name}}
+      {{end}}
+  
+  template.app-health-degraded: |
+    message: |
+      Application {{.app.metadata.name}} has degraded health.
+      {{if ne .serviceType "slack"}}
+      Application details: {{.context.argocdUrl}}/applications/{{.app.metadata.name}}
+      {{end}}
+  
+  template.app-sync-failed: |
+    message: |
+      Application {{.app.metadata.name}} sync has failed.
+      Error: {{.app.status.operationState.message}}
+      {{if ne .serviceType "slack"}}
+      Application details: {{.context.argocdUrl}}/applications/{{.app.metadata.name}}
+      {{end}}
+  
+  trigger.on-deployed: |
+    - when: app.status.operationState.phase in ['Succeeded'] and app.status.health.status == 'Healthy'
+      send: [app-deployed]
+  
+  trigger.on-health-degraded: |
+    - when: app.status.health.status == 'Degraded'
+      send: [app-health-degraded]
+  
+  trigger.on-sync-failed: |
+    - when: app.status.operationState.phase in ['Error', 'Failed']
+      send: [app-sync-failed]
+
+---
+# Secret for Slack notifications
+apiVersion: v1
+kind: Secret
+metadata:
+  name: argocd-notifications-secret
+  namespace: argocd
+type: Opaque
+stringData:
+  slack-token: "xoxb-your-slack-token"

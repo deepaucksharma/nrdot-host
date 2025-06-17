@@ -1,0 +1,242 @@
+# Pod Security Standards for platform services
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: platform-prod
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+# Security Context Constraints (if using OpenShift) or Pod Security Policy
+apiVersion: policy/v1beta1
+kind: PodSecurityPolicy
+metadata:
+  name: platform-restricted
+spec:
+  privileged: false
+  allowPrivilegeEscalation: false
+  requiredDropCapabilities:
+    - ALL
+  volumes:
+    - 'configMap'
+    - 'emptyDir'
+    - 'projected'
+    - 'secret'
+    - 'downwardAPI'
+    - 'persistentVolumeClaim'
+  hostNetwork: false
+  hostIPC: false
+  hostPID: false
+  runAsUser:
+    rule: 'MustRunAsNonRoot'
+  seLinux:
+    rule: 'RunAsAny'
+  supplementalGroups:
+    rule: 'RunAsAny'
+  fsGroup:
+    rule: 'RunAsAny'
+  readOnlyRootFilesystem: true
+---
+# RBAC for Pod Security Policy
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: platform-restricted-psp
+rules:
+- apiGroups: ['policy']
+  resources: ['podsecuritypolicies']
+  verbs: ['use']
+  resourceNames:
+  - platform-restricted
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: platform-restricted-psp-binding
+roleRef:
+  kind: ClusterRole
+  name: platform-restricted-psp
+  apiGroup: rbac.authorization.k8s.io
+subjects:
+- kind: ServiceAccount
+  name: default
+  namespace: platform-prod
+- kind: ServiceAccount
+  name: default
+  namespace: platform-staging
+- kind: ServiceAccount
+  name: default
+  namespace: platform-dev
+---
+# Admission Controller Configuration
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: platform-security-webhook
+webhooks:
+- name: validate.platform.security
+  clientConfig:
+    service:
+      name: platform-security-webhook
+      namespace: platform-system
+      path: "/validate"
+    caBundle: LS0tLS1CRUdJTi... # Base64 encoded CA cert
+  rules:
+  - operations: ["CREATE", "UPDATE"]
+    apiGroups: ["apps", ""]
+    apiVersions: ["v1"]
+    resources: ["deployments", "pods"]
+  namespaceSelector:
+    matchLabels:
+      security: platform
+  admissionReviewVersions: ["v1", "v1beta1"]
+  sideEffects: None
+  failurePolicy: Fail
+---
+# OPA (Open Policy Agent) Policies
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opa-policies
+  namespace: platform-system
+data:
+  container-policies.rego: |
+    package kubernetes.admission
+
+    import future.keywords.contains
+    import future.keywords.if
+    import future.keywords.in
+
+    # Deny containers without resource limits
+    deny[msg] {
+      input.request.kind.kind == "Pod"
+      container := input.request.object.spec.containers[_]
+      not container.resources.limits.memory
+      msg := sprintf("Container %s is missing memory limits", [container.name])
+    }
+
+    deny[msg] {
+      input.request.kind.kind == "Pod"
+      container := input.request.object.spec.containers[_]
+      not container.resources.limits.cpu
+      msg := sprintf("Container %s is missing CPU limits", [container.name])
+    }
+
+    # Deny containers running as root
+    deny[msg] {
+      input.request.kind.kind == "Pod"
+      container := input.request.object.spec.containers[_]
+      container.securityContext.runAsUser == 0
+      msg := sprintf("Container %s cannot run as root", [container.name])
+    }
+
+    # Deny containers with privileged mode
+    deny[msg] {
+      input.request.kind.kind == "Pod"
+      container := input.request.object.spec.containers[_]
+      container.securityContext.privileged == true
+      msg := sprintf("Container %s cannot run in privileged mode", [container.name])
+    }
+
+    # Require non-root filesystem
+    deny[msg] {
+      input.request.kind.kind == "Pod"
+      container := input.request.object.spec.containers[_]
+      container.securityContext.readOnlyRootFilesystem != true
+      msg := sprintf("Container %s must have a read-only root filesystem", [container.name])
+    }
+
+    # Deny host network
+    deny[msg] {
+      input.request.kind.kind == "Pod"
+      input.request.object.spec.hostNetwork == true
+      msg := "Pods cannot use host network"
+    }
+
+    # Deny host PID
+    deny[msg] {
+      input.request.kind.kind == "Pod"
+      input.request.object.spec.hostPID == true
+      msg := "Pods cannot use host PID namespace"
+    }
+
+    # Require specific container registry
+    deny[msg] {
+      input.request.kind.kind == "Pod"
+      container := input.request.object.spec.containers[_]
+      not starts_with(container.image, "123456789012.dkr.ecr.us-east-1.amazonaws.com/")
+      msg := sprintf("Container %s must use approved registry", [container.name])
+    }
+
+    # Require image tags (no latest)
+    deny[msg] {
+      input.request.kind.kind == "Pod"
+      container := input.request.object.spec.containers[_]
+      endswith(container.image, ":latest")
+      msg := sprintf("Container %s cannot use 'latest' tag", [container.name])
+    }
+
+    # Require specific labels
+    deny[msg] {
+      input.request.kind.kind in ["Deployment", "StatefulSet", "DaemonSet"]
+      required_labels := {"app", "version", "team", "environment"}
+      provided_labels := input.request.object.metadata.labels
+      missing_labels := required_labels - {label | provided_labels[label]}
+      count(missing_labels) > 0
+      msg := sprintf("Missing required labels: %v", [missing_labels])
+    }
+---
+# Falco Rules for Runtime Security
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: falco-rules
+  namespace: platform-system
+data:
+  custom-rules.yaml: |
+    - rule: Unauthorized Process in Container
+      desc: Detect unauthorized processes running in containers
+      condition: >
+        container and
+        not proc.name in (python, gunicorn, nginx, node, java) and
+        not proc.pname in (python, gunicorn, nginx, node, java)
+      output: >
+        Unauthorized process started in container
+        (user=%user.name command=%proc.cmdline container=%container.info)
+      priority: WARNING
+
+    - rule: Write to System Directories
+      desc: Detect writes to system directories
+      condition: >
+        container and
+        evt.type = write and
+        fd.name startswith /etc/ or
+        fd.name startswith /usr/ or
+        fd.name startswith /bin/
+      output: >
+        Write to system directory in container
+        (user=%user.name file=%fd.name container=%container.info)
+      priority: ERROR
+
+    - rule: Network Connection to Unexpected Port
+      desc: Detect network connections to unexpected ports
+      condition: >
+        container and
+        evt.type = connect and
+        not fd.sport in (80, 443, 5432, 6379, 8080, 9090)
+      output: >
+        Unexpected network connection
+        (user=%user.name connection=%fd.name container=%container.info)
+      priority: WARNING
+
+    - rule: Shell Spawned in Container
+      desc: Detect shell spawned in production container
+      condition: >
+        container and
+        container.label.environment = "prod" and
+        proc.name in (bash, sh, zsh, fish)
+      output: >
+        Shell spawned in production container
+        (user=%user.name shell=%proc.name container=%container.info)
+      priority: CRITICAL

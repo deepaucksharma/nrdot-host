@@ -1,0 +1,104 @@
+# Velero Backup Configuration for Kubernetes
+apiVersion: velero.io/v1
+kind: BackupStorageLocation
+metadata:
+  name: platform-backup-location
+  namespace: velero
+spec:
+  provider: aws
+  objectStorage:
+    bucket: platform-backups-prod
+    prefix: kubernetes
+  config:
+    region: us-east-1
+    profile: default
+---
+apiVersion: velero.io/v1
+kind: VolumeSnapshotLocation
+metadata:
+  name: platform-volume-snapshots
+  namespace: velero
+spec:
+  provider: aws
+  config:
+    region: us-east-1
+---
+# Daily backup schedule
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: daily-platform-backup
+  namespace: velero
+spec:
+  schedule: "0 2 * * *"  # 2 AM daily
+  template:
+    includedNamespaces:
+      - platform-prod
+      - platform-staging
+    excludedResources:
+      - events
+      - events.events.k8s.io
+    storageLocation: platform-backup-location
+    volumeSnapshotLocations:
+      - platform-volume-snapshots
+    ttl: 168h0m0s  # 7 days retention
+    hooks:
+      resources:
+        - name: database-backup
+          includedNamespaces:
+            - platform-prod
+          labelSelector:
+            matchLabels:
+              app: data-processor
+          pre:
+            - exec:
+                container: data-processor
+                command:
+                  - /bin/bash
+                  - -c
+                  - |
+                    pg_dump -h $DATABASE_HOST -U $DATABASE_USER -d $DATABASE_NAME > /backup/db-backup-$(date +%Y%m%d).sql
+                timeout: 30m
+---
+# Weekly full backup
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: weekly-full-backup
+  namespace: velero
+spec:
+  schedule: "0 3 * * 0"  # 3 AM Sunday
+  template:
+    includedNamespaces:
+      - "*"
+    excludedNamespaces:
+      - kube-system
+      - kube-public
+      - kube-node-lease
+    storageLocation: platform-backup-location
+    volumeSnapshotLocations:
+      - platform-volume-snapshots
+    ttl: 720h0m0s  # 30 days retention
+    defaultVolumesToRestic: true
+---
+# Critical data hourly backup
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: critical-data-backup
+  namespace: velero
+spec:
+  schedule: "0 * * * *"  # Every hour
+  template:
+    includedNamespaces:
+      - platform-prod
+    includedResources:
+      - persistentvolumeclaims
+      - persistentvolumes
+      - configmaps
+      - secrets
+    labelSelector:
+      matchLabels:
+        backup: critical
+    storageLocation: platform-backup-location
+    ttl: 72h0m0s  # 3 days retention

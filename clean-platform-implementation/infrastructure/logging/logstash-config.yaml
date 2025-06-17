@@ -1,0 +1,288 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: logstash-config
+  namespace: logging
+data:
+  logstash.yml: |
+    http.host: "0.0.0.0"
+    xpack.monitoring.enabled: true
+    xpack.monitoring.elasticsearch.hosts: ["https://elasticsearch-master:9200"]
+    xpack.monitoring.elasticsearch.username: "elastic"
+    xpack.monitoring.elasticsearch.password: "${ELASTIC_PASSWORD}"
+    xpack.monitoring.elasticsearch.ssl.certificate_authority: "/usr/share/logstash/certs/ca.crt"
+    pipeline.ecs_compatibility: v1
+    
+  pipelines.yml: |
+    - pipeline.id: kubernetes
+      path.config: "/usr/share/logstash/pipeline/kubernetes.conf"
+    - pipeline.id: application
+      path.config: "/usr/share/logstash/pipeline/application.conf"
+    - pipeline.id: metrics
+      path.config: "/usr/share/logstash/pipeline/metrics.conf"
+      
+  kubernetes.conf: |
+    input {
+      beats {
+        port => 5044
+        ssl => true
+        ssl_certificate => "/usr/share/logstash/certs/logstash.crt"
+        ssl_key => "/usr/share/logstash/certs/logstash.key"
+        tags => ["kubernetes"]
+      }
+    }
+    
+    filter {
+      # Parse Kubernetes metadata
+      if [kubernetes] {
+        mutate {
+          add_field => {
+            "kubernetes_namespace" => "%{[kubernetes][namespace]}"
+            "kubernetes_pod_name" => "%{[kubernetes][pod][name]}"
+            "kubernetes_container_name" => "%{[kubernetes][container][name]}"
+            "kubernetes_node_name" => "%{[kubernetes][node][name]}"
+          }
+        }
+        
+        # Parse container logs
+        if [kubernetes_container_name] == "data-collector" or [kubernetes_container_name] == "data-processor" {
+          json {
+            source => "message"
+            target => "app"
+          }
+          
+          # Extract fields from JSON logs
+          if [app] {
+            mutate {
+              add_field => {
+                "log_level" => "%{[app][level]}"
+                "trace_id" => "%{[app][trace_id]}"
+                "span_id" => "%{[app][span_id]}"
+                "user_id" => "%{[app][user_id]}"
+              }
+            }
+            
+            # Parse timestamp
+            date {
+              match => ["[app][timestamp]", "ISO8601"]
+              target => "@timestamp"
+            }
+          }
+        }
+      }
+      
+      # Add environment tag
+      if [kubernetes_namespace] =~ /prod$/ {
+        mutate { add_tag => ["production"] }
+      } else if [kubernetes_namespace] =~ /staging$/ {
+        mutate { add_tag => ["staging"] }
+      } else {
+        mutate { add_tag => ["development"] }
+      }
+      
+      # GeoIP enrichment for access logs
+      if [client_ip] {
+        geoip {
+          source => "client_ip"
+          target => "geoip"
+        }
+      }
+      
+      # Drop debug logs in production
+      if "production" in [tags] and [log_level] == "debug" {
+        drop { }
+      }
+    }
+    
+    output {
+      elasticsearch {
+        hosts => ["https://elasticsearch-master:9200"]
+        ssl => true
+        ssl_certificate_verification => true
+        cacert => "/usr/share/logstash/certs/ca.crt"
+        user => "elastic"
+        password => "${ELASTIC_PASSWORD}"
+        index => "platform-k8s-%{+YYYY.MM.dd}"
+        template_name => "platform-kubernetes"
+        template => "/usr/share/logstash/templates/kubernetes.json"
+        template_overwrite => true
+      }
+    }
+    
+  application.conf: |
+    input {
+      kafka {
+        bootstrap_servers => "kafka-bootstrap.kafka:9092"
+        topics => ["platform-logs"]
+        group_id => "logstash-application"
+        codec => json
+        tags => ["application"]
+      }
+    }
+    
+    filter {
+      # Parse application logs
+      if [type] == "application" {
+        # Extract service name from topic
+        mutate {
+          add_field => { "service" => "%{[@metadata][kafka][topic]}" }
+        }
+        
+        # Parse structured logs
+        if [message] =~ /^\{.*\}$/ {
+          json {
+            source => "message"
+            target => "app_data"
+          }
+        }
+        
+        # Extract metrics
+        if [app_data][metrics] {
+          ruby {
+            code => '
+              metrics = event.get("[app_data][metrics]")
+              metrics.each do |key, value|
+                event.set("metric_#{key}", value)
+              end
+            '
+          }
+        }
+        
+        # Calculate response time
+        if [app_data][start_time] and [app_data][end_time] {
+          ruby {
+            code => '
+              start_time = Time.parse(event.get("[app_data][start_time]"))
+              end_time = Time.parse(event.get("[app_data][end_time]"))
+              duration = (end_time - start_time) * 1000
+              event.set("response_time_ms", duration)
+            '
+          }
+        }
+      }
+    }
+    
+    output {
+      elasticsearch {
+        hosts => ["https://elasticsearch-master:9200"]
+        ssl => true
+        ssl_certificate_verification => true
+        cacert => "/usr/share/logstash/certs/ca.crt"
+        user => "elastic"
+        password => "${ELASTIC_PASSWORD}"
+        index => "platform-app-%{service}-%{+YYYY.MM.dd}"
+        document_type => "_doc"
+      }
+      
+      # Send critical errors to alerting
+      if [log_level] == "error" or [log_level] == "critical" {
+        http {
+          url => "http://alertmanager.monitoring:9093/api/v1/alerts"
+          http_method => "post"
+          format => "json"
+          mapping => {
+            "labels" => {
+              "alertname" => "ApplicationError"
+              "service" => "%{service}"
+              "severity" => "%{log_level}"
+              "environment" => "%{environment}"
+            }
+            "annotations" => {
+              "description" => "%{message}"
+              "trace_id" => "%{trace_id}"
+            }
+          }
+        }
+      }
+    }
+    
+  metrics.conf: |
+    input {
+      udp {
+        port => 8125
+        codec => plain
+        tags => ["metrics", "statsd"]
+      }
+    }
+    
+    filter {
+      # Parse StatsD metrics
+      if "statsd" in [tags] {
+        grok {
+          match => {
+            "message" => "%{WORD:metric_name}:%{NUMBER:metric_value:float}\|%{WORD:metric_type}(?:\|@%{NUMBER:sample_rate:float})?(?:\|#%{DATA:metric_tags})?"
+          }
+        }
+        
+        # Parse tags
+        if [metric_tags] {
+          ruby {
+            code => '
+              tags = event.get("metric_tags").split(",")
+              tags.each do |tag|
+                key, value = tag.split(":")
+                event.set("tag_#{key}", value)
+              end
+            '
+          }
+        }
+        
+        # Add timestamp
+        ruby {
+          code => 'event.set("@timestamp", Time.now)'
+        }
+      }
+    }
+    
+    output {
+      if "metrics" in [tags] {
+        elasticsearch {
+          hosts => ["https://elasticsearch-master:9200"]
+          ssl => true
+          ssl_certificate_verification => true
+          cacert => "/usr/share/logstash/certs/ca.crt"
+          user => "elastic"
+          password => "${ELASTIC_PASSWORD}"
+          index => "platform-metrics-%{+YYYY.MM.dd}"
+          document_type => "_doc"
+        }
+      }
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: logstash-templates
+  namespace: logging
+data:
+  kubernetes.json: |
+    {
+      "index_patterns": ["platform-k8s-*"],
+      "settings": {
+        "number_of_shards": 3,
+        "number_of_replicas": 1,
+        "index.lifecycle.name": "platform-ilm-policy",
+        "index.lifecycle.rollover_alias": "platform-k8s"
+      },
+      "mappings": {
+        "properties": {
+          "@timestamp": { "type": "date" },
+          "kubernetes_namespace": { "type": "keyword" },
+          "kubernetes_pod_name": { "type": "keyword" },
+          "kubernetes_container_name": { "type": "keyword" },
+          "kubernetes_node_name": { "type": "keyword" },
+          "log_level": { "type": "keyword" },
+          "trace_id": { "type": "keyword" },
+          "span_id": { "type": "keyword" },
+          "user_id": { "type": "keyword" },
+          "message": { "type": "text" },
+          "geoip": {
+            "properties": {
+              "location": { "type": "geo_point" },
+              "country_name": { "type": "keyword" },
+              "city_name": { "type": "keyword" }
+            }
+          }
+        }
+      }
+    }

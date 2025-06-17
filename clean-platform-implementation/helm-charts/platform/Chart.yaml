@@ -1,0 +1,29 @@
+apiVersion: v2
+name: platform
+description: Umbrella chart for the complete platform deployment
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - platform
+  - microservices
+  - data-processing
+home: https://github.com/platform/platform
+sources:
+  - https://github.com/platform/platform
+maintainers:
+  - name: Platform Team
+    email: platform-team@example.com
+dependencies:
+  - name: api-gateway
+    version: "1.0.0"
+    repository: "file://../api-gateway"
+    condition: api-gateway.enabled
+  - name: data-collector
+    version: "1.0.0"
+    repository: "file://../data-collector"
+    condition: data-collector.enabled
+  - name: data-processor
+    version: "1.0.0"
+    repository: "file://../data-processor"
+    condition: data-processor.enabled

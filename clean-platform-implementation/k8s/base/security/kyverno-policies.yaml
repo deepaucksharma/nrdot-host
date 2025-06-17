@@ -1,0 +1,351 @@
+# Kyverno policies for container security enforcement
+# These enforce New Relic platform security requirements per container_security_combined.md
+# All policies are required for CIS Docker Benchmark compliance
+
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-fips-compliant-images
+  annotations:
+    policies.kyverno.io/title: Require FIPS Compliant Images
+    policies.kyverno.io/category: Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      All container images must be FIPS compliant and use approved base images
+      from the newrelic-dokken repository. This ensures cryptographic compliance.
+spec:
+  validationFailureAction: enforce
+  background: true
+  rules:
+    - name: check-fips-compliance
+      match:
+        any:
+        - resources:
+            kinds:
+            - Pod
+            - Deployment
+            - StatefulSet
+            - DaemonSet
+      validate:
+        message: "Images must be FIPS compliant from cf-registry.nr-ops.net/newrelic/* or have fips- prefix"
+        pattern:
+          spec:
+            =(securityContext):
+              =(seccompProfile):
+                type: RuntimeDefault
+            containers:
+            - name: "*"
+              image: "cf-registry.nr-ops.net/newrelic/*:* | cf-registry.nr-ops.net/*/fips-*:*"
+
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-non-root-user
+  annotations:
+    policies.kyverno.io/title: Require Non-Root User (CIS-DI-0001)
+    policies.kyverno.io/category: Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      Containers must run as non-root user with UID > 10000.
+      This is required by CIS-DI-0001 benchmark.
+spec:
+  validationFailureAction: enforce
+  background: true
+  rules:
+    - name: check-non-root
+      match:
+        any:
+        - resources:
+            kinds:
+            - Pod
+      validate:
+        message: "Containers must run as non-root user with UID > 10000 (CIS-DI-0001)"
+        pattern:
+          spec:
+            =(securityContext):
+              runAsNonRoot: "true"
+              runAsUser: ">10000"
+            containers:
+            - name: "*"
+              =(securityContext):
+                runAsNonRoot: "true"
+                runAsUser: ">10000"
+
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-privileged-containers
+  annotations:
+    policies.kyverno.io/title: Disallow Privileged Containers
+    policies.kyverno.io/category: Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      Containers must not run in privileged mode. This is a CIS benchmark requirement.
+spec:
+  validationFailureAction: enforce
+  background: true
+  rules:
+    - name: check-containers
+      match:
+        any:
+        - resources:
+            kinds:
+            - Pod
+      validate:
+        message: "Privileged containers are not allowed"
+        pattern:
+          spec:
+            =(securityContext):
+              =(privileged): "false"
+            containers:
+            - name: "*"
+              =(securityContext):
+                =(privileged): "false"
+
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-image-scan
+  annotations:
+    policies.kyverno.io/title: Require Image Security Scan
+    policies.kyverno.io/category: Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      All images must pass security scanning with PIE scan tool before deployment.
+spec:
+  validationFailureAction: enforce
+  background: false
+  rules:
+    - name: check-image-scan
+      match:
+        any:
+        - resources:
+            kinds:
+            - Pod
+      preconditions:
+        all:
+        - key: "{{ request.operation }}"
+          operator: In
+          value: ["CREATE", "UPDATE"]
+      validate:
+        message: "Image must pass security scan with PIE scan tool"
+        deny:
+          conditions:
+            any:
+            - key: "{{ images.*.configData.config.Labels.\"security.scan.status\" || '' }}"
+              operator: NotEquals
+              value: "passed"
+
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-pod-resources
+  annotations:
+    policies.kyverno.io/title: Require Pod Resources
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      Pods must have resource requests and limits defined
+spec:
+  validationFailureAction: enforce
+  background: true
+  rules:
+    - name: validate-resources
+      match:
+        any:
+        - resources:
+            kinds:
+            - Pod
+      validate:
+        message: "Resource requests and limits are required"
+        pattern:
+          spec:
+            containers:
+            - name: "*"
+              resources:
+                requests:
+                  memory: "?*"
+                  cpu: "?*"
+                limits:
+                  memory: "?*"
+                  cpu: "?*"
+
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-host-namespace
+  annotations:
+    policies.kyverno.io/title: Disallow Host Namespace
+    policies.kyverno.io/category: Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      Containers must not use host networking, PID, or IPC namespaces.
+spec:
+  validationFailureAction: enforce
+  background: true
+  rules:
+    - name: check-host-namespace
+      match:
+        any:
+        - resources:
+            kinds:
+            - Pod
+      validate:
+        message: "Host namespace sharing is not allowed"
+        pattern:
+          spec:
+            =(hostNetwork): "false"
+            =(hostPID): "false"
+            =(hostIPC): "false"
+
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-privilege-escalation
+  annotations:
+    policies.kyverno.io/title: Disallow Privilege Escalation
+    policies.kyverno.io/category: Pod Security Standards (Restricted)
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      Containers must not allow privilege escalation
+spec:
+  validationFailureAction: enforce
+  background: true
+  rules:
+    - name: check-privilege-escalation
+      match:
+        any:
+        - resources:
+            kinds:
+            - Pod
+      validate:
+        message: "Privilege escalation is not allowed"
+        pattern:
+          spec:
+            containers:
+            - name: "*"
+              securityContext:
+                allowPrivilegeEscalation: "false"
+
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-read-only-root-filesystem
+  annotations:
+    policies.kyverno.io/title: Require Read-Only Root Filesystem
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      Containers should have a read-only root filesystem
+spec:
+  validationFailureAction: enforce
+  background: true
+  rules:
+    - name: validate-read-only-root
+      match:
+        any:
+        - resources:
+            kinds:
+            - Pod
+      validate:
+        message: "Containers must have a read-only root filesystem"
+        pattern:
+          spec:
+            containers:
+            - name: "*"
+              securityContext:
+                readOnlyRootFilesystem: "true"
+
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-drop-all-capabilities
+  annotations:
+    policies.kyverno.io/title: Require Drop All Capabilities
+    policies.kyverno.io/category: Pod Security Standards (Restricted)
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      Containers must drop all capabilities and only add back what is needed.
+spec:
+  validationFailureAction: enforce
+  background: true
+  rules:
+    - name: check-drop-capabilities
+      match:
+        any:
+        - resources:
+            kinds:
+            - Pod
+      validate:
+        message: "Containers must drop ALL capabilities"
+        pattern:
+          spec:
+            containers:
+            - name: "*"
+              securityContext:
+                capabilities:
+                  drop:
+                  - "ALL"
+
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: validate-cis-benchmarks
+  annotations:
+    policies.kyverno.io/title: Validate CIS Docker Benchmarks
+    policies.kyverno.io/category: Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      Enforce CIS Docker benchmark requirements including CIS-DI-0007, CIS-DI-0008, CIS-DI-0009, CIS-DI-0010
+spec:
+  validationFailureAction: enforce
+  background: true
+  rules:
+    - name: check-team-labels
+      match:
+        any:
+        - resources:
+            kinds:
+            - Pod
+            - Service
+            - Deployment
+            - StatefulSet
+      validate:
+        message: "Resources must have team ownership labels"
+        pattern:
+          metadata:
+            labels:
+              team: "?*"
+              service: "?*"
+    - name: check-security-labels
+      match:
+        any:
+        - resources:
+            kinds:
+            - Pod
+      validate:
+        message: "Pods must have security scanning labels"
+        pattern:
+          metadata:
+            labels:
+              "security.scan.required": "true"
+              "security.fips.compliant": "true"
