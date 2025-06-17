@@ -87,7 +87,7 @@ func (h *HealthChecker) Monitor(ctx context.Context) <-chan error {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(5 * time.Second):
+		case <-time.After(h.interval):
 		}
 
 		for {

@@ -69,7 +69,7 @@ func (pm *PatternManager) loadDefaultPatterns() {
 		},
 		{
 			name:    "slack_token",
-			pattern: `xox[baprs]-[0-9]{10,13}-[0-9]{10,13}-[a-zA-Z0-9]{20,}`,
+			pattern: `xox[baprs]-[a-zA-Z0-9\-]{10,}`,
 		},
 		// Credit Cards
 		{
