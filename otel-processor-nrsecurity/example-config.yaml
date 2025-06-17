@@ -1,0 +1,82 @@
+# Example OpenTelemetry Collector configuration with NR Security processor
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  nrsecurity:
+    # Enable the security processor
+    enabled: true
+    
+    # Text to replace redacted values with
+    replacement_text: "[REDACTED]"
+    
+    # Optional: redact email addresses
+    redact_emails: false
+    
+    # Optional: redact IP addresses
+    redact_ips: false
+    
+    # Additional custom patterns for redaction
+    patterns:
+      - name: "internal_id"
+        regex: "INT-[0-9]{8}"
+      - name: "session_token"
+        regex: "sess_[a-zA-Z0-9]{32}"
+    
+    # Keywords that trigger redaction when found in attribute names
+    keywords:
+      - password
+      - secret
+      - token
+      - key
+      - credential
+      - auth
+      - private
+    
+    # Attributes that should never be redacted
+    allow_list:
+      - "service.name"
+      - "service.version"
+      - "span.kind"
+      - "http.method"
+      - "http.status_code"
+    
+    # Attributes that should always be redacted
+    deny_list:
+      - "http.request.header.authorization"
+      - "http.request.header.x-api-key"
+      - "db.connection_string"
+      - "user.email"
+      - "user.ssn"
+
+exporters:
+  logging:
+    loglevel: debug
+  
+  otlp:
+    endpoint: "your-backend:4317"
+    tls:
+      insecure: false
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [nrsecurity]
+      exporters: [logging, otlp]
+    
+    metrics:
+      receivers: [otlp]
+      processors: [nrsecurity]
+      exporters: [logging, otlp]
+    
+    logs:
+      receivers: [otlp]
+      processors: [nrsecurity]
+      exporters: [logging, otlp]

@@ -1,0 +1,81 @@
+# Example OpenTelemetry Collector configuration with nrcap processor
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  nrcap:
+    # Global cardinality limit across all metrics
+    global_limit: 100000
+    
+    # Per-metric cardinality limits
+    metric_limits:
+      http_requests_total: 10000
+      http_request_duration_seconds: 10000
+      db_connections: 5000
+      process_cpu_seconds_total: 1000
+      custom_metric: 5000
+    
+    # Default limit for metrics not explicitly configured
+    default_limit: 1000
+    
+    # Limiting strategy: drop, aggregate, sample, oldest
+    strategy: aggregate
+    
+    # High-cardinality labels to remove (deny list)
+    deny_labels:
+      - request_id
+      - session_id
+      - trace_id
+      - span_id
+      - user_id
+    
+    # Labels to always keep when aggregating
+    aggregation_labels:
+      - service
+      - environment
+      - host
+      - region
+      - method
+      - status_code
+    
+    # Reset interval for cardinality tracking
+    reset_interval: 1h
+    
+    # Time window for tracking cardinality
+    window_size: 5m
+    
+    # Enable cardinality statistics reporting
+    enable_stats: true
+    
+    # Sample rate for sample strategy (0.0-1.0)
+    sample_rate: 0.1
+    
+    # Alert when cardinality reaches this percentage of limit
+    alert_threshold: 90
+
+exporters:
+  otlp:
+    endpoint: localhost:4317
+    tls:
+      insecure: true
+  
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    namespace: "collector"
+
+service:
+  telemetry:
+    logs:
+      level: debug
+  
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [nrcap]
+      exporters: [otlp, prometheus]

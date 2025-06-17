@@ -1,0 +1,93 @@
+# Example configuration for the NR Enrich processor
+processors:
+  nrenrich:
+    # Static attributes added to all telemetry
+    static_attributes:
+      environment: production
+      datacenter: us-east-1
+      team: platform-engineering
+      version: "${SERVICE_VERSION}"
+    
+    # Environment metadata collection settings
+    environment:
+      enabled: true
+      hostname: true           # Collect hostname
+      cloud_provider: true     # Auto-detect and collect cloud metadata
+      kubernetes: true         # Collect K8s metadata if available
+      system: true            # Collect system info (OS, arch, CPUs)
+    
+    # Process metadata via privileged helper
+    process:
+      enabled: true
+      helper_endpoint: "unix:///var/run/nrdot/helper.sock"
+      timeout: 5s
+    
+    # Conditional enrichment rules (using CEL expressions)
+    rules:
+      # High priority for POST requests
+      - condition: 'attributes["http.method"] == "POST"'
+        attributes:
+          priority: "high"
+          sla_tier: "critical"
+        priority: 100
+      
+      # Tag API service requests
+      - condition: 'resource.attributes["service.name"] == "api-gateway"'
+        attributes:
+          service.tier: "frontend"
+          service.type: "api"
+        priority: 90
+      
+      # Mark errors for alerting
+      - condition: 'attributes["http.status_code"] >= 500'
+        attributes:
+          alert.required: true
+          error.category: "server_error"
+        priority: 95
+    
+    # Dynamic attribute computation
+    dynamic:
+      # Categorize request sizes
+      - target: "http.request.size_category"
+        source: "http.request.body.size"
+        transform: |
+          if value < 1024:
+            return "small"
+          elif value < 1048576:
+            return "medium"
+          else:
+            return "large"
+      
+      # Calculate response time category
+      - target: "response.performance"
+        source: "http.response.duration_ms"
+        transform: |
+          if value < 100:
+            return "fast"
+          elif value < 500:
+            return "normal"
+          else:
+            return "slow"
+    
+    # Metadata caching configuration
+    cache:
+      ttl: 5m          # Time-to-live for cached metadata
+      max_size: 1000   # Maximum cache entries
+
+# Example pipeline configuration
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [nrenrich, batch]
+      exporters: [otlp]
+    
+    metrics:
+      receivers: [prometheus]
+      processors: [nrenrich, batch]
+      exporters: [otlp]
+    
+    logs:
+      receivers: [filelog]
+      processors: [nrenrich, batch]
+      exporters: [otlp]

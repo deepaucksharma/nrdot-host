@@ -1,0 +1,164 @@
+# Test configuration for NRDOT Custom OpenTelemetry Collector
+# This configuration enables all NRDOT processors for testing
+
+receivers:
+  # OTLP receiver for traces, metrics, and logs
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  # Host metrics receiver
+  hostmetrics:
+    collection_interval: 10s
+    scrapers:
+      cpu:
+      disk:
+      load:
+      filesystem:
+      memory:
+      network:
+      paging:
+      processes:
+      process:
+
+  # Prometheus receiver for scraping metrics
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'otel-collector'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['0.0.0.0:8888']
+
+processors:
+  # Memory limiter to prevent OOM
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 30
+
+  # NRDOT Security Processor
+  nrsecurity:
+    block_insecure_connections: true
+    allowed_domains:
+      - "*.nrdot.com"
+      - "localhost"
+    validate_headers: true
+    max_request_size: 10MB
+
+  # NRDOT Enrichment Processor
+  nrenrich:
+    add_environment_info: true
+    add_kubernetes_metadata: false
+    custom_attributes:
+      service.namespace: "nrdot"
+      deployment.environment: "test"
+    
+  # NRDOT Transform Processor
+  nrtransform:
+    error_mode: propagate
+    trace_statements:
+      - context: span
+        statements:
+          - set(attributes["span.kind"], "SPAN_KIND_INTERNAL") where attributes["span.kind"] == nil
+          - set(attributes["processed"], true)
+    
+    metric_statements:
+      - context: datapoint
+        statements:
+          - set(attributes["source"], "nrdot-collector")
+    
+    log_statements:
+      - context: log
+        statements:
+          - set(attributes["log.source"], "nrdot")
+
+  # NRDOT CAP (Cardinality Analysis & Protection) Processor
+  nrcap:
+    cardinality_limit: 10000
+    check_interval: 60s
+    dimensions_limit:
+      - metric_name: "http_requests_total"
+        limit: 1000
+      - metric_name: "database_queries"
+        limit: 500
+    enforce_limits: true
+    log_cardinality_violations: true
+
+  # Batch processor for efficiency
+  batch:
+    timeout: 10s
+    send_batch_size: 1024
+
+exporters:
+  # Logging exporter for debugging
+  logging:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+  # OTLP exporter (configure endpoint as needed)
+  otlp:
+    endpoint: localhost:4317
+    tls:
+      insecure: true
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+
+  # Prometheus exporter for metrics
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    namespace: nrdot
+    const_labels:
+      collector: nrdot
+
+extensions:
+  # Health check extension
+  health_check:
+    endpoint: 0.0.0.0:13133
+    path: "/health"
+    
+  # Performance profiling
+  pprof:
+    endpoint: 0.0.0.0:1777
+    
+  # zPages for debugging
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+service:
+  extensions: [health_check, pprof, zpages]
+  
+  pipelines:
+    # Traces pipeline with all NRDOT processors
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, nrsecurity, nrenrich, nrtransform, batch]
+      exporters: [logging, otlp]
+    
+    # Metrics pipeline with CAP processor
+    metrics:
+      receivers: [otlp, hostmetrics, prometheus]
+      processors: [memory_limiter, nrsecurity, nrenrich, nrcap, nrtransform, batch]
+      exporters: [logging, prometheus]
+    
+    # Logs pipeline
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, nrsecurity, nrenrich, nrtransform, batch]
+      exporters: [logging, otlp]
+
+  telemetry:
+    logs:
+      level: info
+      initial_fields:
+        service: nrdot-collector
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888

@@ -1,0 +1,270 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nrdot.newrelic.com/schemas/nrdot-config.json",
+  "title": "NRDOT Host Configuration",
+  "description": "Configuration schema for NRDOT Host monitoring",
+  "type": "object",
+  "required": ["service"],
+  "properties": {
+    "service": {
+      "type": "object",
+      "description": "Service identification and metadata",
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Service name",
+          "minLength": 1,
+          "maxLength": 255,
+          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9-_.]*$"
+        },
+        "environment": {
+          "type": "string",
+          "description": "Deployment environment",
+          "enum": ["development", "staging", "production", "test"],
+          "default": "production"
+        },
+        "version": {
+          "type": "string",
+          "description": "Service version",
+          "pattern": "^v?[0-9]+\\.[0-9]+\\.[0-9]+(-[a-zA-Z0-9]+)?$"
+        },
+        "tags": {
+          "type": "object",
+          "description": "Additional service tags",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "license_key": {
+      "type": "string",
+      "description": "New Relic license key",
+      "pattern": "^[a-f0-9]{40}$|^\\$\\{[A-Z_]+\\}$"
+    },
+    "account_id": {
+      "type": ["string", "integer"],
+      "description": "New Relic account ID",
+      "pattern": "^[0-9]+$|^\\$\\{[A-Z_]+\\}$"
+    },
+    "metrics": {
+      "type": "object",
+      "description": "Metrics collection configuration",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable metrics collection",
+          "default": true
+        },
+        "interval": {
+          "type": "string",
+          "description": "Collection interval (e.g., 30s, 1m)",
+          "pattern": "^[0-9]+(s|m|h)$",
+          "default": "60s"
+        },
+        "include": {
+          "type": "array",
+          "description": "Metric name patterns to include",
+          "items": {
+            "type": "string"
+          }
+        },
+        "exclude": {
+          "type": "array",
+          "description": "Metric name patterns to exclude",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "traces": {
+      "type": "object",
+      "description": "Traces collection configuration",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable trace collection",
+          "default": true
+        },
+        "sample_rate": {
+          "type": "number",
+          "description": "Sampling rate (0.0 to 1.0)",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "default": 0.1
+        }
+      }
+    },
+    "logs": {
+      "type": "object",
+      "description": "Logs collection configuration",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable log collection",
+          "default": true
+        },
+        "sources": {
+          "type": "array",
+          "description": "Log file sources",
+          "items": {
+            "type": "object",
+            "required": ["path"],
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "Log file path or pattern"
+              },
+              "parser": {
+                "type": "string",
+                "description": "Log parser type",
+                "enum": ["json", "apache", "nginx", "syslog", "multiline"]
+              },
+              "attributes": {
+                "type": "object",
+                "description": "Additional attributes to add",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "security": {
+      "type": "object",
+      "description": "Security configuration",
+      "properties": {
+        "redact_secrets": {
+          "type": "boolean",
+          "description": "Enable automatic secret redaction",
+          "default": true
+        },
+        "allowed_attributes": {
+          "type": "array",
+          "description": "Whitelist of allowed attribute names",
+          "items": {
+            "type": "string"
+          }
+        },
+        "blocked_attributes": {
+          "type": "array",
+          "description": "Blacklist of blocked attribute names",
+          "items": {
+            "type": "string"
+          }
+        },
+        "custom_redaction_patterns": {
+          "type": "array",
+          "description": "Custom regex patterns for redaction",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "processing": {
+      "type": "object",
+      "description": "Data processing configuration",
+      "properties": {
+        "cardinality_limit": {
+          "type": "integer",
+          "description": "Maximum cardinality per metric",
+          "minimum": 100,
+          "maximum": 100000,
+          "default": 10000
+        },
+        "enrichment": {
+          "type": "object",
+          "description": "Data enrichment settings",
+          "properties": {
+            "add_host_metadata": {
+              "type": "boolean",
+              "default": true
+            },
+            "add_cloud_metadata": {
+              "type": "boolean",
+              "default": true
+            },
+            "add_kubernetes_metadata": {
+              "type": "boolean",
+              "default": true
+            }
+          }
+        }
+      }
+    },
+    "export": {
+      "type": "object",
+      "description": "Export configuration",
+      "properties": {
+        "endpoint": {
+          "type": "string",
+          "description": "OTLP endpoint URL",
+          "format": "uri",
+          "default": "https://otlp.nr-data.net"
+        },
+        "region": {
+          "type": "string",
+          "description": "New Relic region",
+          "enum": ["US", "EU"],
+          "default": "US"
+        },
+        "compression": {
+          "type": "string",
+          "description": "Compression type",
+          "enum": ["gzip", "none"],
+          "default": "gzip"
+        },
+        "timeout": {
+          "type": "string",
+          "description": "Export timeout",
+          "pattern": "^[0-9]+(s|m)$",
+          "default": "30s"
+        },
+        "retry": {
+          "type": "object",
+          "description": "Retry configuration",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true
+            },
+            "max_attempts": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10,
+              "default": 3
+            },
+            "backoff": {
+              "type": "string",
+              "pattern": "^[0-9]+(s|m)$",
+              "default": "5s"
+            }
+          }
+        }
+      }
+    },
+    "logging": {
+      "type": "object",
+      "description": "NRDOT logging configuration",
+      "properties": {
+        "level": {
+          "type": "string",
+          "description": "Log level",
+          "enum": ["debug", "info", "warn", "error"],
+          "default": "info"
+        },
+        "format": {
+          "type": "string",
+          "description": "Log format",
+          "enum": ["json", "text"],
+          "default": "text"
+        }
+      }
+    }
+  }
+}

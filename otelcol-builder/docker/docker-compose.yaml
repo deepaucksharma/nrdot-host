@@ -1,0 +1,127 @@
+version: '3.8'
+
+services:
+  nrdot-collector:
+    image: nrdot/otel-collector:latest
+    container_name: nrdot-collector
+    hostname: nrdot-collector
+    restart: unless-stopped
+    
+    # Override command to use local config if needed
+    # command: ["--config", "/etc/otel/config.yaml"]
+    
+    ports:
+      # OTLP gRPC receiver
+      - "4317:4317"
+      # OTLP HTTP receiver
+      - "4318:4318"
+      # Metrics endpoint
+      - "8888:8888"
+      # Prometheus exporter
+      - "8889:8889"
+      # Health check
+      - "13133:13133"
+      # pprof endpoint
+      - "1777:1777"
+      # zPages
+      - "55679:55679"
+    
+    volumes:
+      # Mount custom configuration
+      - ../test-config.yaml:/etc/otel/config.yaml:ro
+      # Mount for persistent data if needed
+      - otel-data:/var/lib/otel
+      
+    environment:
+      # Set log level
+      - OTEL_LOG_LEVEL=info
+      # Set resource attributes
+      - OTEL_RESOURCE_ATTRIBUTES=service.name=nrdot-collector,service.version=1.0.0
+      # Memory limits
+      - GOMEMLIMIT=1GiB
+      
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:13133/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=nrdot-collector"
+    
+    networks:
+      - nrdot-network
+
+  # Optional: Prometheus for testing metrics export
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: nrdot-prometheus
+    restart: unless-stopped
+    
+    ports:
+      - "9090:9090"
+    
+    volumes:
+      - ./prometheus.yaml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    
+    networks:
+      - nrdot-network
+    
+    depends_on:
+      - nrdot-collector
+
+  # Optional: Jaeger for testing trace export
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: nrdot-jaeger
+    restart: unless-stopped
+    
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    
+    ports:
+      # Jaeger UI
+      - "16686:16686"
+      # OTLP gRPC
+      - "4317:4317"
+      # OTLP HTTP
+      - "4318:4318"
+    
+    networks:
+      - nrdot-network
+
+networks:
+  nrdot-network:
+    driver: bridge
+    name: nrdot-network
+
+volumes:
+  otel-data:
+    name: nrdot-otel-data
+  prometheus-data:
+    name: nrdot-prometheus-data

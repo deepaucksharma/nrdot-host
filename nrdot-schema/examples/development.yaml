@@ -1,0 +1,53 @@
+# Development environment NRDOT configuration with verbose settings
+
+service:
+  name: my-app-dev
+  environment: development
+  tags:
+    developer: ${USER}
+    branch: ${GIT_BRANCH}
+
+# For development, you might hardcode the license key (not recommended for production)
+license_key: ${NEW_RELIC_LICENSE_KEY}
+
+metrics:
+  enabled: true
+  interval: 10s  # More frequent collection for development
+  # Collect all metrics in development
+  include:
+    - "*"
+
+traces:
+  enabled: true
+  sample_rate: 1.0  # 100% sampling for development debugging
+
+logs:
+  enabled: true
+  sources:
+    - path: ./logs/*.log
+      parser: multiline
+      attributes:
+        environment: dev
+    - path: stdout
+      parser: json
+
+security:
+  redact_secrets: false  # Might disable for debugging (be careful!)
+  
+processing:
+  cardinality_limit: 100000  # Higher limit for development exploration
+  enrichment:
+    add_host_metadata: true
+    add_cloud_metadata: false  # Might not be in cloud for dev
+    add_kubernetes_metadata: false
+
+export:
+  endpoint: https://otlp.nr-data.net
+  compression: none  # No compression for easier debugging
+  timeout: 60s  # Longer timeout for development
+  retry:
+    enabled: false  # Fail fast in development
+
+logging:
+  level: debug  # Verbose logging
+  format: text  # Human-readable format

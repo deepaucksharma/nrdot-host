@@ -1,0 +1,30 @@
+[Unit]
+Description=NRDot Supervisor for OpenTelemetry Collector
+After=network.target
+
+[Service]
+Type=simple
+User=otel
+Group=otel
+ExecStart=/usr/local/bin/nrdot-supervisor \
+    --collector-binary /usr/local/bin/otelcol \
+    --collector-config /etc/otel/config.yaml \
+    --memory-limit 1073741824 \
+    --restart-policy on-failure \
+    --restart-max-retries 10 \
+    --health-interval 10s \
+    --telemetry-endpoint http://localhost:4318/v1/metrics \
+    --log-level info
+
+Restart=always
+RestartSec=5
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/otel
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,35 @@
+# Built binary
+nrdot-collector
+nrdot-collector.exe
+
+# Build artifacts
+_build/
+*.log
+*.tmp
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+coverage.txt
+coverage.html
+*.test
+
+# Docker volumes (if any)
+docker/data/
+
+# Temporary files
+*.bak
+*.orig
+
+# Go workspace files
+go.work
+go.work.sum

@@ -1,0 +1,5 @@
+# Minimal NRDOT configuration
+# Only the service name is required
+
+service:
+  name: my-application

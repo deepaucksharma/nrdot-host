@@ -1,0 +1,84 @@
+# Production-ready NRDOT configuration with security and optimization
+
+service:
+  name: api-gateway
+  environment: production
+  version: v2.1.0
+  tags:
+    team: platform
+    cost-center: engineering
+    tier: critical
+
+# Use environment variables for sensitive data
+license_key: ${NEW_RELIC_LICENSE_KEY}
+account_id: ${NEW_RELIC_ACCOUNT_ID}
+
+metrics:
+  enabled: true
+  interval: 30s
+  # Include only production-relevant metrics
+  include:
+    - "http.server.*"
+    - "grpc.server.*"
+    - "db.query.*"
+    - "cache.*"
+    - "queue.*"
+  exclude:
+    - "*.debug"
+    - "*.test"
+
+traces:
+  enabled: true
+  sample_rate: 0.01  # 1% sampling for high-traffic production
+
+logs:
+  enabled: true
+  sources:
+    - path: /var/log/app/api.log
+      parser: json
+      attributes:
+        service: api
+        log_type: application
+    - path: /var/log/nginx/access.log
+      parser: nginx
+      attributes:
+        service: nginx
+        log_type: access
+
+security:
+  redact_secrets: true
+  # Block sensitive attributes
+  blocked_attributes:
+    - password
+    - api_key
+    - token
+    - secret
+    - credit_card
+    - ssn
+    - email
+  # Custom patterns for your specific use case
+  custom_redaction_patterns:
+    - "AUTH-TOKEN:\\s*[A-Za-z0-9+/=]+"
+    - "session_id=\\w+"
+
+processing:
+  # Higher cardinality limit for production
+  cardinality_limit: 50000
+  enrichment:
+    add_host_metadata: true
+    add_cloud_metadata: true
+    add_kubernetes_metadata: true
+
+export:
+  endpoint: https://otlp.nr-data.net
+  region: US
+  compression: gzip
+  timeout: 30s
+  retry:
+    enabled: true
+    max_attempts: 5
+    backoff: 10s
+
+logging:
+  level: info  # Use info or warn for production
+  format: json  # Structured logging for production

@@ -1,0 +1,99 @@
+# Example NRDOT configuration file
+license_key: YOUR_NEW_RELIC_LICENSE_KEY
+
+# Collector configuration
+collector:
+  # Enable specific receivers
+  receivers:
+    - hostmetrics
+    - prometheus
+    - otlp
+  
+  # Configure processors
+  processors:
+    - batch
+    - memory_limiter
+    - attributes
+
+# Custom attributes to add to all telemetry
+custom_attributes:
+  environment: production
+  region: us-east-1
+  team: platform
+  service: nrdot-host
+
+# Host monitoring configuration
+host_monitoring:
+  enabled: true
+  collection_interval: 60s
+  
+  # CPU monitoring
+  cpu:
+    enabled: true
+    
+  # Memory monitoring
+  memory:
+    enabled: true
+    
+  # Disk monitoring
+  disk:
+    enabled: true
+    mount_points:
+      - /
+      - /var
+      - /home
+      
+  # Network monitoring
+  network:
+    enabled: true
+    interfaces:
+      - eth0
+      - lo
+
+# Prometheus scraping configuration
+prometheus:
+  enabled: true
+  scrape_configs:
+    - job_name: node_exporter
+      scrape_interval: 30s
+      static_configs:
+        - targets:
+          - localhost:9100
+          
+    - job_name: custom_app
+      scrape_interval: 15s
+      static_configs:
+        - targets:
+          - localhost:8080
+          - localhost:8081
+
+# OTLP receiver configuration
+otlp:
+  enabled: true
+  grpc:
+    endpoint: 0.0.0.0:4317
+  http:
+    endpoint: 0.0.0.0:4318
+
+# Resource limits
+resource_limits:
+  memory_limit_mib: 512
+  memory_spike_limit_mib: 128
+  check_interval: 1s
+
+# Batch processing configuration
+batch:
+  timeout: 10s
+  send_batch_size: 1000
+  send_batch_max_size: 2000
+
+# Logging configuration
+logging:
+  level: info
+  format: json
+  
+# Debug configuration
+debug:
+  enabled: false
+  metrics:
+    address: :8888

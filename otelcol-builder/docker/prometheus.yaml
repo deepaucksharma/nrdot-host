@@ -1,0 +1,20 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'nrdot-monitor'
+
+scrape_configs:
+  # Scrape NRDOT Collector metrics
+  - job_name: 'nrdot-collector'
+    static_configs:
+      - targets: ['nrdot-collector:8888']
+        labels:
+          service: 'nrdot-collector'
+          
+  # Scrape NRDOT Collector Prometheus exporter
+  - job_name: 'nrdot-metrics'
+    static_configs:
+      - targets: ['nrdot-collector:8889']
+        labels:
+          service: 'nrdot-exported-metrics'
