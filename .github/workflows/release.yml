@@ -1,0 +1,195 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  GO_VERSION: '1.21'
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Generate changelog
+      id: changelog
+      run: |
+        PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+        if [ -z "$PREV_TAG" ]; then
+          CHANGELOG=$(git log --pretty=format:"- %s" HEAD)
+        else
+          CHANGELOG=$(git log --pretty=format:"- %s" ${PREV_TAG}..HEAD)
+        fi
+        echo "changelog<<EOF" >> $GITHUB_OUTPUT
+        echo "$CHANGELOG" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref }}
+        release_name: Release ${{ github.ref }}
+        body: |
+          ## What's Changed
+          ${{ steps.changelog.outputs.changelog }}
+
+          ## Docker Images
+          - `ghcr.io/${{ github.repository }}/nrdot-collector:${{ github.ref_name }}`
+          - `ghcr.io/${{ github.repository }}/nrdot-supervisor:${{ github.ref_name }}`
+          - `ghcr.io/${{ github.repository }}/nrdot-config-engine:${{ github.ref_name }}`
+          - `ghcr.io/${{ github.repository }}/nrdot-api-server:${{ github.ref_name }}`
+          - `ghcr.io/${{ github.repository }}/nrdot-ctl:${{ github.ref_name }}`
+        draft: false
+        prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-beta') || contains(github.ref, '-alpha') }}
+
+  build-binaries:
+    name: Build Binaries
+    needs: release
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        arch: [amd64, arm64]
+        exclude:
+          - os: windows-latest
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+
+    - name: Set environment variables
+      run: |
+        echo "GOOS=${{ runner.os == 'Windows' && 'windows' || runner.os == 'macOS' && 'darwin' || 'linux' }}" >> $GITHUB_ENV
+        echo "GOARCH=${{ matrix.arch }}" >> $GITHUB_ENV
+        echo "EXT=${{ runner.os == 'Windows' && '.exe' || '' }}" >> $GITHUB_ENV
+
+    - name: Build binaries
+      run: |
+        VERSION=${{ github.ref_name }}
+        for component in nrdot-ctl nrdot-collector nrdot-supervisor nrdot-config-engine nrdot-api-server; do
+          echo "Building $component..."
+          GOOS=${{ env.GOOS }} GOARCH=${{ env.GOARCH }} go build -ldflags "-X main.Version=$VERSION" -o dist/${component}-${{ env.GOOS }}-${{ env.GOARCH }}${{ env.EXT }} ./${component}/...
+        done
+
+    - name: Create archive
+      run: |
+        cd dist
+        if [ "${{ runner.os }}" = "Windows" ]; then
+          7z a -tzip nrdot-${{ github.ref_name }}-${{ env.GOOS }}-${{ env.GOARCH }}.zip *
+        else
+          tar czf nrdot-${{ github.ref_name }}-${{ env.GOOS }}-${{ env.GOARCH }}.tar.gz *
+        fi
+
+    - name: Upload Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ needs.release.outputs.upload_url }}
+        asset_path: ./dist/nrdot-${{ github.ref_name }}-${{ env.GOOS }}-${{ env.GOARCH }}.${{ runner.os == 'Windows' && 'zip' || 'tar.gz' }}
+        asset_name: nrdot-${{ github.ref_name }}-${{ env.GOOS }}-${{ env.GOARCH }}.${{ runner.os == 'Windows' && 'zip' || 'tar.gz' }}
+        asset_content_type: ${{ runner.os == 'Windows' && 'application/zip' || 'application/gzip' }}
+
+  build-docker:
+    name: Build and Push Docker Images
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Build and push Docker images
+      run: |
+        VERSION=${{ github.ref_name }}
+        REGISTRY=ghcr.io/${{ github.repository }}
+        
+        for component in collector supervisor config-engine api-server ctl; do
+          echo "Building $component..."
+          docker build -t ${REGISTRY}/nrdot-${component}:${VERSION} -t ${REGISTRY}/nrdot-${component}:latest -f docker/${component}/Dockerfile .
+          docker push ${REGISTRY}/nrdot-${component}:${VERSION}
+          docker push ${REGISTRY}/nrdot-${component}:latest
+        done
+
+  publish-helm-chart:
+    name: Publish Helm Chart
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Helm
+      uses: azure/setup-helm@v3
+      with:
+        version: 'v3.13.2'
+
+    - name: Package Helm chart
+      run: |
+        cd kubernetes/helm
+        helm package nrdot --version ${{ github.ref_name }}
+
+    - name: Upload Helm chart to release
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ needs.release.outputs.upload_url }}
+        asset_path: ./kubernetes/helm/nrdot-${{ github.ref_name }}.tgz
+        asset_name: nrdot-helm-${{ github.ref_name }}.tgz
+        asset_content_type: application/gzip
+
+  update-docs:
+    name: Update Documentation
+    needs: release
+    runs-on: ubuntu-latest
+    if: ${{ !contains(github.ref, '-rc') && !contains(github.ref, '-beta') && !contains(github.ref, '-alpha') }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Update version references
+      run: |
+        VERSION=${{ github.ref_name }}
+        find . -name "*.md" -type f -exec sed -i "s/v[0-9]\+\.[0-9]\+\.[0-9]\+/${VERSION}/g" {} \;
+        find . -name "*.yaml" -o -name "*.yml" -type f -exec sed -i "s/version: v[0-9]\+\.[0-9]\+\.[0-9]\+/version: ${VERSION}/g" {} \;
+
+    - name: Commit and push changes
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add -A
+        git commit -m "docs: Update version to ${{ github.ref_name }}" || echo "No changes to commit"
+        git push

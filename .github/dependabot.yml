@@ -1,0 +1,85 @@
+version: 2
+updates:
+  # Enable version updates for Go modules
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:00"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "deepaucksharma"
+    labels:
+      - "dependencies"
+      - "go"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+
+  # Enable version updates for Docker
+  - package-ecosystem: "docker"
+    directory: "/docker/base"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "docker"
+
+  - package-ecosystem: "docker"
+    directory: "/docker/collector"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "docker"
+
+  # Enable version updates for GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "github-actions"
+
+  # Check each component's Go modules
+  - package-ecosystem: "gomod"
+    directory: "/otel-processor-common"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "processor"
+
+  - package-ecosystem: "gomod"
+    directory: "/nrdot-schema"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "core"
+
+  - package-ecosystem: "gomod"
+    directory: "/nrdot-template-lib"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "core"
+
+  - package-ecosystem: "gomod"
+    directory: "/nrdot-telemetry-client"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "core"
+
+  - package-ecosystem: "gomod"
+    directory: "/nrdot-ctl"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "cli"
