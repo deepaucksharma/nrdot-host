@@ -1,103 +1,300 @@
-# NRDOT-Host Master Makefile
-# Orchestrates building, testing, and deployment across all repositories
+# NRDOT-HOST Project Makefile
+# Main build automation for all components
 
-.PHONY: all build test clean deploy
+.PHONY: all build test clean install docker help
 
-# Default target
-all: build
+# Variables
+GO := go
+DOCKER := docker
+DOCKER_COMPOSE := docker-compose
+KUBECTL := kubectl
+HELM := helm
 
-# Build all components
-build: build-core build-processors build-tools
+# Version information
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+BUILD_TIME := $(shell date -u +%Y%m%d-%H%M%S)
+LDFLAGS := -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildTime=$(BUILD_TIME)
 
-build-core:
-	@echo "Building Core Components..."
-	$(MAKE) -C nrdot-ctl build
-	$(MAKE) -C nrdot-config-engine build
-	$(MAKE) -C nrdot-supervisor build
-	$(MAKE) -C nrdot-telemetry-client build
-	$(MAKE) -C nrdot-template-lib build
+# Component directories
+COMPONENTS := otel-processor-common \
+              nrdot-schema \
+              nrdot-template-lib \
+              nrdot-telemetry-client \
+              nrdot-privileged-helper \
+              nrdot-api-server \
+              nrdot-config-engine \
+              nrdot-supervisor \
+              otel-processor-nrsecurity \
+              otel-processor-nrenrich \
+              otel-processor-nrtransform \
+              otel-processor-nrcap \
+              nrdot-ctl
 
-build-processors:
-	@echo "Building OTel Processors..."
-	$(MAKE) -C otel-processor-common build
-	$(MAKE) -C otel-processor-nrsecurity build
-	$(MAKE) -C otel-processor-nrenrich build
-	$(MAKE) -C otel-processor-nrtransform build
-	$(MAKE) -C otel-processor-nrcap build
-	$(MAKE) -C nrdot-privileged-helper build
+# Output directory
+BIN_DIR := bin
+DIST_DIR := dist
 
-build-tools:
-	@echo "Building Tools..."
-	$(MAKE) -C nrdot-api-server build
-	$(MAKE) -C nrdot-debug-tools build
-	$(MAKE) -C nrdot-migrate build# Testing targets
-test: test-unit test-integration test-security
+## Default target - build all components
+all: clean build
 
-test-unit:
-	@echo "Running unit tests..."
-	@for dir in */; do \
-		if [ -f $$dir/Makefile ]; then \
-			$(MAKE) -C $$dir test || exit 1; \
-		fi \
+## Build all components
+build: $(BIN_DIR)
+	@echo "Building all NRDOT-HOST components..."
+	@for component in $(COMPONENTS); do \
+		echo "Building $$component..." ; \
+		cd $$component && $(GO) build -ldflags "$(LDFLAGS)" -o ../$(BIN_DIR)/$$component ./... || exit 1 ; \
+		cd .. ; \
 	done
+	@echo "Building OTel Collector with NRDOT processors..."
+	@cd otelcol-builder && make build
+	@echo "All components built successfully!"
 
-test-integration:
+## Run tests for all components
+test:
+	@echo "Running tests for all components..."
+	@for component in $(COMPONENTS); do \
+		echo "Testing $$component..." ; \
+		cd $$component && $(GO) test -v -race -coverprofile=coverage.out ./... || exit 1 ; \
+		cd .. ; \
+	done
 	@echo "Running integration tests..."
-	$(MAKE) -C nrdot-test-harness test-integration
+	@cd integration-tests && make test
+	@echo "All tests passed!"
 
-test-security:
-	@echo "Running security validation..."
-	$(MAKE) -C nrdot-compliance-validator test
+## Run linting for all components
+lint:
+	@echo "Running linters..."
+	@for component in $(COMPONENTS); do \
+		echo "Linting $$component..." ; \
+		cd $$component && golangci-lint run || exit 1 ; \
+		cd .. ; \
+	done
 
-# Benchmarking
-benchmark:
-	@echo "Running benchmarks..."
-	$(MAKE) -C nrdot-benchmark-suite benchmark
-
-# Package building
-package: build
-	@echo "Building packages..."
-	$(MAKE) -C nrdot-packaging all
-
-# Container images
-docker: build
-	@echo "Building container images..."
-	$(MAKE) -C nrdot-container-images build# Deployment
-deploy-guardian-fleet:
-	@echo "Deploying Guardian Fleet..."
-	$(MAKE) -C guardian-fleet-infra deploy
-
-# Development setup
-setup:
-	@echo "Setting up development environment..."
-	go mod download
-	@for dir in */; do \
-		if [ -f $$dir/go.mod ]; then \
-			cd $$dir && go mod download && cd ..; \
+## Generate code (if needed)
+generate:
+	@echo "Generating code..."
+	@for component in $(COMPONENTS); do \
+		if [ -f "$$component/generate.go" ]; then \
+			echo "Generating for $$component..." ; \
+			cd $$component && $(GO) generate ./... ; \
+			cd .. ; \
 		fi \
 	done
 
-# Clean build artifacts
-clean:
-	@echo "Cleaning build artifacts..."
-	@for dir in */; do \
-		if [ -f $$dir/Makefile ]; then \
-			$(MAKE) -C $$dir clean; \
-		fi \
+## Build Docker images
+docker: docker-build
+
+docker-build:
+	@echo "Building Docker images..."
+	@cd docker && make build-all TAG=$(VERSION)
+
+docker-push:
+	@echo "Pushing Docker images..."
+	@cd docker && make push-all TAG=$(VERSION)
+
+## Install components locally
+install: build
+	@echo "Installing NRDOT-HOST components..."
+	@mkdir -p /usr/local/bin
+	@for binary in $(BIN_DIR)/*; do \
+		echo "Installing $$(basename $$binary)..." ; \
+		sudo install -m 755 $$binary /usr/local/bin/ ; \
 	done
+	@echo "Installation complete!"
 
-# Run local NRDOT instance
-run-local: build
-	@echo "Starting local NRDOT instance..."
-	./nrdot-ctl/bin/nrdot-ctl start --config=./examples/local-config.yml
+## Deploy to Kubernetes
+deploy-k8s:
+	@echo "Deploying to Kubernetes..."
+	@cd kubernetes/helm/nrdot && $(HELM) upgrade --install nrdot . -f values.yaml
 
-# Generate documentation
+## Run development environment
+dev:
+	@echo "Starting development environment..."
+	@cd docker && $(DOCKER_COMPOSE) up -d
+	@echo "Development environment running!"
+	@echo "API Server: http://localhost:8089"
+	@echo "Collector: http://localhost:4317"
+	@echo "Prometheus: http://localhost:9090"
+
+## Stop development environment
+dev-stop:
+	@echo "Stopping development environment..."
+	@cd docker && $(DOCKER_COMPOSE) down
+
+## Run E2E tests
+e2e-test:
+	@echo "Running E2E tests..."
+	@cd e2e-tests && make test-all
+
+## Run specific component
+run-%:
+	@echo "Running $*..."
+	@$(BIN_DIR)/$* $(ARGS)
+
+## Build specific component
+build-%:
+	@echo "Building $*..."
+	@cd $* && $(GO) build -ldflags "$(LDFLAGS)" -o ../$(BIN_DIR)/$* ./...
+
+## Test specific component
+test-%:
+	@echo "Testing $*..."
+	@cd $* && $(GO) test -v -race ./...
+
+## Create release artifacts
+release: clean
+	@echo "Creating release artifacts..."
+	@mkdir -p $(DIST_DIR)
+	@for os in linux darwin windows; do \
+		for arch in amd64 arm64; do \
+			echo "Building for $$os/$$arch..." ; \
+			for component in $(COMPONENTS); do \
+				GOOS=$$os GOARCH=$$arch $(GO) build -ldflags "$(LDFLAGS)" \
+					-o $(DIST_DIR)/$$component-$$os-$$arch$$( [ $$os = "windows" ] && echo ".exe" ) \
+					./$$component/... || exit 1 ; \
+			done ; \
+		done ; \
+	done
+	@echo "Creating tarballs..."
+	@cd $(DIST_DIR) && for file in *; do tar czf $$file.tar.gz $$file; done
+	@echo "Release artifacts created in $(DIST_DIR)/"
+
+## Run security scan
+security-scan:
+	@echo "Running security scans..."
+	@for component in $(COMPONENTS); do \
+		echo "Scanning $$component..." ; \
+		cd $$component && gosec -fmt json -out security-report.json ./... ; \
+		cd .. ; \
+	done
+	@cd docker && ./security-scan.sh
+
+## Generate documentation
 docs:
 	@echo "Generating documentation..."
-	@for dir in */; do \
-		if [ -f $$dir/README.md ]; then \
-			echo "Processing $$dir"; \
+	@for component in $(COMPONENTS); do \
+		echo "Documenting $$component..." ; \
+		cd $$component && godoc -http=:6060 & \
+		cd .. ; \
+	done
+
+## Run benchmarks
+benchmark:
+	@echo "Running benchmarks..."
+	@for component in $(COMPONENTS); do \
+		if ls $$component/*_test.go 2>/dev/null | grep -q bench; then \
+			echo "Benchmarking $$component..." ; \
+			cd $$component && $(GO) test -bench=. -benchmem ./... ; \
+			cd .. ; \
 		fi \
 	done
 
-.DEFAULT_GOAL := all
+## Update dependencies
+update-deps:
+	@echo "Updating dependencies..."
+	@for component in $(COMPONENTS); do \
+		echo "Updating $$component dependencies..." ; \
+		cd $$component && $(GO) get -u ./... && $(GO) mod tidy ; \
+		cd .. ; \
+	done
+
+## Clean build artifacts
+clean:
+	@echo "Cleaning build artifacts..."
+	@rm -rf $(BIN_DIR) $(DIST_DIR)
+	@for component in $(COMPONENTS); do \
+		cd $$component && $(GO) clean -cache -testcache ; \
+		cd .. ; \
+	done
+	@find . -name "*.out" -type f -delete
+	@find . -name "*.log" -type f -delete
+	@echo "Cleanup complete!"
+
+## Setup development environment
+setup:
+	@echo "Setting up development environment..."
+	@./scripts/setup-dev.sh
+	@echo "Installing tools..."
+	@$(GO) install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+	@$(GO) install github.com/securego/gosec/v2/cmd/gosec@latest
+	@$(GO) install golang.org/x/tools/cmd/godoc@latest
+	@echo "Setup complete!"
+
+## Verify installation
+verify:
+	@echo "Verifying NRDOT-HOST installation..."
+	@for binary in nrdot-ctl nrdot-collector nrdot-supervisor; do \
+		if command -v $$binary >/dev/null 2>&1; then \
+			echo "✓ $$binary installed" ; \
+		else \
+			echo "✗ $$binary not found" ; \
+		fi \
+	done
+
+## Show component status
+status:
+	@echo "NRDOT-HOST Component Status"
+	@echo "=========================="
+	@echo "Version: $(VERSION)"
+	@echo "Commit: $(COMMIT)"
+	@echo ""
+	@echo "Components:"
+	@for component in $(COMPONENTS); do \
+		if [ -f "$(BIN_DIR)/$$component" ]; then \
+			echo "✓ $$component (built)" ; \
+		else \
+			echo "✗ $$component (not built)" ; \
+		fi \
+	done
+
+## Create directories
+$(BIN_DIR):
+	@mkdir -p $(BIN_DIR)
+
+$(DIST_DIR):
+	@mkdir -p $(DIST_DIR)
+
+## Display help
+help:
+	@echo "NRDOT-HOST Makefile"
+	@echo "=================="
+	@echo ""
+	@echo "Usage: make [target]"
+	@echo ""
+	@echo "Main targets:"
+	@echo "  all              Build all components (default)"
+	@echo "  build            Build all components"
+	@echo "  test             Run all tests"
+	@echo "  docker           Build Docker images"
+	@echo "  install          Install components locally"
+	@echo "  clean            Clean build artifacts"
+	@echo ""
+	@echo "Development targets:"
+	@echo "  dev              Start development environment"
+	@echo "  dev-stop         Stop development environment"
+	@echo "  lint             Run linters"
+	@echo "  setup            Setup development environment"
+	@echo ""
+	@echo "Testing targets:"
+	@echo "  test             Run unit tests"
+	@echo "  e2e-test         Run E2E tests"
+	@echo "  benchmark        Run benchmarks"
+	@echo "  security-scan    Run security scans"
+	@echo ""
+	@echo "Component targets:"
+	@echo "  build-<name>     Build specific component"
+	@echo "  test-<name>      Test specific component"
+	@echo "  run-<name>       Run specific component"
+	@echo ""
+	@echo "Release targets:"
+	@echo "  release          Create release artifacts"
+	@echo "  docker-push      Push Docker images"
+	@echo "  deploy-k8s       Deploy to Kubernetes"
+	@echo ""
+	@echo "Other targets:"
+	@echo "  docs             Generate documentation"
+	@echo "  update-deps      Update dependencies"
+	@echo "  verify           Verify installation"
+	@echo "  status           Show component status"
+	@echo "  help             Display this help"
