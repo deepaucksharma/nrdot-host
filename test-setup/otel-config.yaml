@@ -1,0 +1,112 @@
+# OpenTelemetry Collector Configuration
+# Simulating NRDOT-HOST behavior
+
+receivers:
+  # Scrape metrics from test app
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'node-exporter'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['test-app:9100']
+              labels:
+                service: 'test-app'
+                environment: 'test'
+
+  # OTLP receiver for traces/metrics
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Simulate nrsecurity processor - redact sensitive data
+  attributes/security:
+    actions:
+      - key: password
+        action: delete
+      - key: api_key
+        action: delete
+      - key: credit_card
+        action: delete
+      - pattern: .*secret.*
+        action: delete
+
+  # Simulate nrenrich processor - add metadata
+  attributes/enrich:
+    actions:
+      - key: host.name
+        value: test-host
+        action: upsert
+      - key: cloud.provider
+        value: docker
+        action: upsert
+      - key: service.version
+        value: "1.0.0"
+        action: upsert
+
+  # Simulate nrtransform processor - calculations
+  metricstransform:
+    transforms:
+      - include: node_memory_.*
+        match_type: regexp
+        action: update
+        operations:
+          - action: add_label
+            new_label: unit
+            new_value: bytes
+
+  # Batch for performance
+  batch:
+    timeout: 10s
+    send_batch_size: 1000
+
+  # Memory limiter
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 100
+
+exporters:
+  # Export to mock New Relic
+  otlp/newrelic:
+    endpoint: mock-newrelic:4317
+    tls:
+      insecure: true
+    headers:
+      api-key: ${NRDOT_LICENSE_KEY}
+
+  # Prometheus exporter for local viewing
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    
+  # Debug logging
+  logging:
+    loglevel: info
+    sampling_initial: 10
+    sampling_thereafter: 100
+
+service:
+  pipelines:
+    metrics:
+      receivers: [prometheus, otlp]
+      processors: [memory_limiter, attributes/security, attributes/enrich, metricstransform, batch]
+      exporters: [otlp/newrelic, prometheus, logging]
+    
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, attributes/security, attributes/enrich, batch]
+      exporters: [otlp/newrelic, logging]
+
+  extensions: [health_check, pprof, zpages]
+  
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+  pprof:
+    endpoint: 0.0.0.0:1777
+  zpages:
+    endpoint: 0.0.0.0:55679
