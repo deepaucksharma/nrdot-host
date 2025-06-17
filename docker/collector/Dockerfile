@@ -4,7 +4,7 @@
 ARG BASE_IMAGE=docker.io/newrelic/nrdot-base:latest
 
 # Build stage
-FROM golang:1.21-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 # Install dependencies
 RUN apk add --no-cache make git gcc musl-dev linux-headers
