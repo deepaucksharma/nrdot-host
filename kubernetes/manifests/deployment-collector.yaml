@@ -1,0 +1,207 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nrdot-collector
+  namespace: nrdot-system
+  labels:
+    app.kubernetes.io/name: nrdot
+    app.kubernetes.io/component: collector
+    app.kubernetes.io/part-of: nrdot-host
+    app.kubernetes.io/version: "1.0.0"
+spec:
+  replicas: 3  # HA configuration with multiple replicas
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nrdot
+      app.kubernetes.io/component: collector
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: nrdot
+        app.kubernetes.io/component: collector
+        app.kubernetes.io/part-of: nrdot-host
+        app.kubernetes.io/version: "1.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8888"
+        prometheus.io/path: "/metrics"
+        # Force pod restart on config changes
+        checksum/config: "{{ include (print $.Template.BasePath \"/configmap.yaml\") . | sha256sum }}"
+    spec:
+      serviceAccountName: nrdot-collector
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+      - name: wait-for-config
+        image: busybox:1.35
+        command: ['sh', '-c', 'until test -f /etc/otel/otelcol-config.yaml; do echo waiting for config; sleep 2; done']
+        volumeMounts:
+        - name: config
+          mountPath: /etc/otel
+          readOnly: true
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 10001
+          capabilities:
+            drop:
+            - ALL
+      containers:
+      - name: collector
+        image: docker.io/newrelic/nrdot-collector:latest
+        imagePullPolicy: IfNotPresent
+        args:
+          - --config=/etc/otel/otelcol-config.yaml
+          - --feature-gates=telemetry.useOtelForInternalMetrics
+        ports:
+        - name: otlp-grpc
+          containerPort: 4317
+          protocol: TCP
+        - name: otlp-http
+          containerPort: 4318
+          protocol: TCP
+        - name: metrics
+          containerPort: 8888
+          protocol: TCP
+        - name: health
+          containerPort: 13133
+          protocol: TCP
+        - name: zpages
+          containerPort: 55679
+          protocol: TCP
+        env:
+        - name: NEW_RELIC_LICENSE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: nrdot-secrets
+              key: NEW_RELIC_LICENSE_KEY
+        - name: NEW_RELIC_OTLP_ENDPOINT
+          value: "otlp.nr-data.net:4317"
+        - name: OTEL_RESOURCE_ATTRIBUTES
+          value: "service.name=nrdot-collector,deployment.environment=kubernetes"
+        - name: K8S_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: K8S_POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: K8S_POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: K8S_POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: K8S_POD_UID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.uid
+        - name: GOMAXPROCS
+          value: "4"
+        - name: GOMEMLIMIT
+          value: "3750MiB"
+        volumeMounts:
+        - name: config
+          mountPath: /etc/otel
+          readOnly: true
+        - name: collector-data
+          mountPath: /var/lib/otel
+        - name: temp
+          mountPath: /tmp
+        - name: cache
+          mountPath: /var/cache/otel
+        resources:
+          requests:
+            cpu: 1000m
+            memory: 2Gi
+          limits:
+            cpu: 4000m
+            memory: 4Gi
+        livenessProbe:
+          httpGet:
+            path: /
+            port: health
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /
+            port: health
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 10001
+          capabilities:
+            drop:
+            - ALL
+      volumes:
+      - name: config
+        configMap:
+          name: nrdot-config
+          items:
+          - key: otelcol-config.yaml
+            path: otelcol-config.yaml
+      - name: collector-data
+        emptyDir:
+          sizeLimit: 5Gi
+      - name: temp
+        emptyDir: {}
+      - name: cache
+        emptyDir: {}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app.kubernetes.io/component
+                  operator: In
+                  values:
+                  - collector
+              topologyKey: kubernetes.io/hostname
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: DoesNotExist
+      tolerations:
+      - key: "dedicated"
+        operator: "Equal"
+        value: "monitoring"
+        effect: "NoSchedule"
+      - key: "node.kubernetes.io/memory-pressure"
+        operator: "Exists"
+        effect: "NoSchedule"
+      nodeSelector:
+        kubernetes.io/os: linux
+      priorityClassName: system-cluster-critical
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: DoNotSchedule
+        labelSelector:
+          matchLabels:
+            app.kubernetes.io/component: collector

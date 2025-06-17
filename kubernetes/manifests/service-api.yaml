@@ -1,0 +1,72 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nrdot-api
+  namespace: nrdot-system
+  labels:
+    app.kubernetes.io/name: nrdot
+    app.kubernetes.io/component: api-server
+    app.kubernetes.io/part-of: nrdot-host
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-backend-protocol: "ssl"
+    service.beta.kubernetes.io/aws-load-balancer-ssl-ports: "https"
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: nrdot
+    app.kubernetes.io/component: api-server
+  ports:
+  - name: https
+    port: 443
+    targetPort: http
+    protocol: TCP
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 10800
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nrdot-api-internal
+  namespace: nrdot-system
+  labels:
+    app.kubernetes.io/name: nrdot
+    app.kubernetes.io/component: api-server
+    app.kubernetes.io/part-of: nrdot-host
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: nrdot
+    app.kubernetes.io/component: api-server
+  ports:
+  - name: http
+    port: 8080
+    targetPort: http
+    protocol: TCP
+  - name: metrics
+    port: 8082
+    targetPort: metrics
+    protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nrdot-api-server
+  namespace: nrdot-system
+  labels:
+    app.kubernetes.io/name: nrdot
+    app.kubernetes.io/component: api-server
+    app.kubernetes.io/part-of: nrdot-host
+spec:
+  type: ClusterIP
+  clusterIP: None  # Headless service for direct pod access
+  selector:
+    app.kubernetes.io/name: nrdot
+    app.kubernetes.io/component: api-server
+  ports:
+  - name: http
+    port: 8080
+    targetPort: http
+    protocol: TCP

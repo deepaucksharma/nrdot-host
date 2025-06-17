@@ -1,0 +1,305 @@
+# Default deny all ingress traffic
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: nrdot-system
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+---
+# Default deny all egress traffic except DNS
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-egress
+  namespace: nrdot-system
+spec:
+  podSelector: {}
+  policyTypes:
+  - Egress
+  egress:
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+---
+# Allow ingress to API server
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nrdot-api-server
+  namespace: nrdot-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: api-server
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector: {}  # Allow from any namespace
+    - podSelector: {}        # Allow from pods in same namespace
+    ports:
+    - protocol: TCP
+      port: 8080
+    - protocol: TCP
+      port: 8082
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/component: supervisor
+    ports:
+    - protocol: TCP
+      port: 8083
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/component: collector
+    ports:
+    - protocol: TCP
+      port: 8888
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/component: config-engine
+    ports:
+    - protocol: TCP
+      port: 8081
+  - to:  # Allow DNS
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+---
+# Allow ingress to collector
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nrdot-collector
+  namespace: nrdot-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: collector
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector: {}  # Allow OTLP from any namespace
+    ports:
+    - protocol: TCP
+      port: 4317
+    - protocol: TCP
+      port: 4318
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/component: api-server
+    ports:
+    - protocol: TCP
+      port: 8888
+  - from:  # Prometheus scraping
+    - namespaceSelector:
+        matchLabels:
+          name: prometheus
+    ports:
+    - protocol: TCP
+      port: 8888
+  egress:
+  - to:  # New Relic endpoint
+    - ipBlock:
+        cidr: 0.0.0.0/0
+        except:
+        - 10.0.0.0/8
+        - 172.16.0.0/12
+        - 192.168.0.0/16
+    ports:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 4317
+  - to:  # Kubernetes API
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: TCP
+      port: 443
+  - to:  # DNS
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+  - to:  # Privileged helper
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/component: privileged-helper
+    ports:
+    - protocol: TCP
+      port: 8090
+---
+# Allow config engine communication
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nrdot-config-engine
+  namespace: nrdot-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: config-engine
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/component: api-server
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/component: supervisor
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/component: collector
+    ports:
+    - protocol: TCP
+      port: 8081
+    - protocol: TCP
+      port: 8082
+  egress:
+  - to:  # Kubernetes API for ConfigMap updates
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: TCP
+      port: 443
+  - to:  # DNS
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+---
+# Allow supervisor communication
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nrdot-supervisor
+  namespace: nrdot-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: supervisor
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/component: api-server
+    ports:
+    - protocol: TCP
+      port: 8081
+    - protocol: TCP
+      port: 8082
+    - protocol: TCP
+      port: 8083
+  egress:
+  - to:  # Kubernetes API
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: TCP
+      port: 443
+  - to:  # Config engine
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/component: config-engine
+    ports:
+    - protocol: TCP
+      port: 8081
+  - to:  # DNS
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+---
+# Allow privileged helper - needs broader access
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nrdot-privileged-helper
+  namespace: nrdot-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: privileged-helper
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/component: collector
+    ports:
+    - protocol: TCP
+      port: 8090
+    - protocol: TCP
+      port: 8084
+  egress:
+  - to:  # Kubernetes API
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: TCP
+      port: 443
+  - to:  # Container runtime endpoints
+    - ipBlock:
+        cidr: 0.0.0.0/0  # Needs to access host network
+    ports:
+    - protocol: TCP
+      port: 2375  # Docker
+    - protocol: TCP
+      port: 2376  # Docker TLS
+    - protocol: TCP
+      port: 10250 # Kubelet
+  - to:  # DNS
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53

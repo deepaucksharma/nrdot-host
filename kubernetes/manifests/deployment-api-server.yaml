@@ -1,0 +1,219 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nrdot-api-server
+  namespace: nrdot-system
+  labels:
+    app.kubernetes.io/name: nrdot
+    app.kubernetes.io/component: api-server
+    app.kubernetes.io/part-of: nrdot-host
+    app.kubernetes.io/version: "1.0.0"
+spec:
+  replicas: 2  # HA configuration
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nrdot
+      app.kubernetes.io/component: api-server
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: nrdot
+        app.kubernetes.io/component: api-server
+        app.kubernetes.io/part-of: nrdot-host
+        app.kubernetes.io/version: "1.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8082"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: nrdot-api-server
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+      - name: wait-for-dependencies
+        image: busybox:1.35
+        command: 
+        - sh
+        - -c
+        - |
+          until nc -z nrdot-supervisor 8083; do 
+            echo "Waiting for supervisor..."
+            sleep 2
+          done
+          until nc -z nrdot-collector 4317; do 
+            echo "Waiting for collector..."
+            sleep 2
+          done
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 10001
+          capabilities:
+            drop:
+            - ALL
+      containers:
+      - name: api-server
+        image: docker.io/newrelic/nrdot-api-server:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        - name: metrics
+          containerPort: 8082
+          protocol: TCP
+        env:
+        - name: NRDOT_API_PORT
+          value: "8080"
+        - name: NRDOT_API_HOST
+          value: "0.0.0.0"
+        - name: NRDOT_API_AUTH_ENABLED
+          value: "true"
+        - name: NRDOT_API_AUTH_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: nrdot-secrets
+              key: API_AUTH_TOKEN
+        - name: NRDOT_API_TLS_ENABLED
+          value: "true"
+        - name: NRDOT_API_TLS_CERT_FILE
+          value: "/etc/nrdot/tls/tls.crt"
+        - name: NRDOT_API_TLS_KEY_FILE
+          value: "/etc/nrdot/tls/tls.key"
+        - name: NRDOT_API_CORS_ENABLED
+          value: "false"
+        - name: NRDOT_API_METRICS_ENABLED
+          value: "true"
+        - name: NRDOT_API_METRICS_PORT
+          value: "8082"
+        - name: NRDOT_LOG_LEVEL
+          value: "info"
+        - name: NRDOT_API_READ_TIMEOUT
+          value: "30s"
+        - name: NRDOT_API_WRITE_TIMEOUT
+          value: "30s"
+        - name: NRDOT_API_IDLE_TIMEOUT
+          value: "120s"
+        - name: NRDOT_API_MAX_HEADER_BYTES
+          value: "1048576"
+        - name: NRDOT_SUPERVISOR_URL
+          value: "http://nrdot-supervisor:8083"
+        - name: NRDOT_COLLECTOR_URL
+          value: "http://nrdot-collector:8888"
+        - name: NRDOT_CONFIG_ENGINE_URL
+          value: "http://nrdot-config-engine:8081"
+        - name: GOMAXPROCS
+          valueFrom:
+            resourceFieldRef:
+              resource: limits.cpu
+        - name: GOMEMLIMIT
+          valueFrom:
+            resourceFieldRef:
+              resource: limits.memory
+        volumeMounts:
+        - name: config
+          mountPath: /etc/nrdot/config
+          readOnly: true
+        - name: tls-certs
+          mountPath: /etc/nrdot/tls
+          readOnly: true
+        - name: temp
+          mountPath: /tmp
+        - name: cache
+          mountPath: /var/cache/nrdot
+        resources:
+          requests:
+            cpu: 250m
+            memory: 256Mi
+          limits:
+            cpu: 1000m
+            memory: 1Gi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+            scheme: HTTPS
+          initialDelaySeconds: 15
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: http
+            scheme: HTTPS
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        startupProbe:
+          httpGet:
+            path: /health
+            port: http
+            scheme: HTTPS
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 30
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 10001
+          capabilities:
+            drop:
+            - ALL
+      volumes:
+      - name: config
+        configMap:
+          name: nrdot-config
+      - name: tls-certs
+        secret:
+          secretName: nrdot-tls
+          defaultMode: 0400
+      - name: temp
+        emptyDir: {}
+      - name: cache
+        emptyDir: {}
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app.kubernetes.io/component
+                operator: In
+                values:
+                - api-server
+            topologyKey: kubernetes.io/hostname
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: DoesNotExist
+      tolerations:
+      - key: "dedicated"
+        operator: "Equal"
+        value: "monitoring"
+        effect: "NoSchedule"
+      nodeSelector:
+        kubernetes.io/os: linux
+      priorityClassName: system-node-critical
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: DoNotSchedule
+        labelSelector:
+          matchLabels:
+            app.kubernetes.io/component: api-server

@@ -1,0 +1,71 @@
+# PodDisruptionBudget for Collector
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: nrdot-collector
+  namespace: nrdot-system
+  labels:
+    app.kubernetes.io/name: nrdot
+    app.kubernetes.io/component: collector
+    app.kubernetes.io/part-of: nrdot-host
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nrdot
+      app.kubernetes.io/component: collector
+  unhealthyPodEvictionPolicy: AlwaysAllow
+---
+# PodDisruptionBudget for API Server
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: nrdot-api-server
+  namespace: nrdot-system
+  labels:
+    app.kubernetes.io/name: nrdot
+    app.kubernetes.io/component: api-server
+    app.kubernetes.io/part-of: nrdot-host
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nrdot
+      app.kubernetes.io/component: api-server
+  unhealthyPodEvictionPolicy: AlwaysAllow
+---
+# PodDisruptionBudget for Supervisor
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: nrdot-supervisor
+  namespace: nrdot-system
+  labels:
+    app.kubernetes.io/name: nrdot
+    app.kubernetes.io/component: supervisor
+    app.kubernetes.io/part-of: nrdot-host
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nrdot
+      app.kubernetes.io/component: supervisor
+  unhealthyPodEvictionPolicy: AlwaysAllow
+---
+# PodDisruptionBudget for Privileged Helper (DaemonSet)
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: nrdot-privileged-helper
+  namespace: nrdot-system
+  labels:
+    app.kubernetes.io/name: nrdot
+    app.kubernetes.io/component: privileged-helper
+    app.kubernetes.io/part-of: nrdot-host
+spec:
+  maxUnavailable: "33%"  # Allow 1/3 of nodes to be updated at a time
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nrdot
+      app.kubernetes.io/component: privileged-helper
+  unhealthyPodEvictionPolicy: AlwaysAllow

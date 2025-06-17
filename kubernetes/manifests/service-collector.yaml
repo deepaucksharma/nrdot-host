@@ -1,0 +1,168 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nrdot-collector
+  namespace: nrdot-system
+  labels:
+    app.kubernetes.io/name: nrdot
+    app.kubernetes.io/component: collector
+    app.kubernetes.io/part-of: nrdot-host
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: nrdot
+    app.kubernetes.io/component: collector
+  ports:
+  - name: otlp-grpc
+    port: 4317
+    targetPort: otlp-grpc
+    protocol: TCP
+  - name: otlp-http
+    port: 4318
+    targetPort: otlp-http
+    protocol: TCP
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 10800
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nrdot-collector-internal
+  namespace: nrdot-system
+  labels:
+    app.kubernetes.io/name: nrdot
+    app.kubernetes.io/component: collector
+    app.kubernetes.io/part-of: nrdot-host
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: nrdot
+    app.kubernetes.io/component: collector
+  ports:
+  - name: otlp-grpc
+    port: 4317
+    targetPort: otlp-grpc
+    protocol: TCP
+  - name: otlp-http
+    port: 4318
+    targetPort: otlp-http
+    protocol: TCP
+  - name: metrics
+    port: 8888
+    targetPort: metrics
+    protocol: TCP
+  - name: health
+    port: 13133
+    targetPort: health
+    protocol: TCP
+  - name: zpages
+    port: 55679
+    targetPort: zpages
+    protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nrdot-collector-headless
+  namespace: nrdot-system
+  labels:
+    app.kubernetes.io/name: nrdot
+    app.kubernetes.io/component: collector
+    app.kubernetes.io/part-of: nrdot-host
+spec:
+  type: ClusterIP
+  clusterIP: None  # Headless service for direct pod access
+  selector:
+    app.kubernetes.io/name: nrdot
+    app.kubernetes.io/component: collector
+  ports:
+  - name: otlp-grpc
+    port: 4317
+    targetPort: otlp-grpc
+    protocol: TCP
+  - name: otlp-http
+    port: 4318
+    targetPort: otlp-http
+    protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nrdot-config-engine
+  namespace: nrdot-system
+  labels:
+    app.kubernetes.io/name: nrdot
+    app.kubernetes.io/component: config-engine
+    app.kubernetes.io/part-of: nrdot-host
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: nrdot
+    app.kubernetes.io/component: config-engine
+  ports:
+  - name: health
+    port: 8081
+    targetPort: health
+    protocol: TCP
+  - name: metrics
+    port: 8082
+    targetPort: metrics
+    protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nrdot-supervisor
+  namespace: nrdot-system
+  labels:
+    app.kubernetes.io/name: nrdot
+    app.kubernetes.io/component: supervisor
+    app.kubernetes.io/part-of: nrdot-host
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: nrdot
+    app.kubernetes.io/component: supervisor
+  ports:
+  - name: health
+    port: 8081
+    targetPort: health
+    protocol: TCP
+  - name: metrics
+    port: 8082
+    targetPort: metrics
+    protocol: TCP
+  - name: api
+    port: 8083
+    targetPort: api
+    protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nrdot-privileged-helper
+  namespace: nrdot-system
+  labels:
+    app.kubernetes.io/name: nrdot
+    app.kubernetes.io/component: privileged-helper
+    app.kubernetes.io/part-of: nrdot-host
+spec:
+  type: ClusterIP
+  clusterIP: None  # Headless service - each node has its own instance
+  selector:
+    app.kubernetes.io/name: nrdot
+    app.kubernetes.io/component: privileged-helper
+  ports:
+  - name: socket
+    port: 8090
+    targetPort: socket
+    protocol: TCP
+  - name: metrics
+    port: 8084
+    targetPort: metrics
+    protocol: TCP

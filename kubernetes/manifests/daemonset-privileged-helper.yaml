@@ -1,0 +1,201 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nrdot-privileged-helper
+  namespace: nrdot-system
+  labels:
+    app.kubernetes.io/name: nrdot
+    app.kubernetes.io/component: privileged-helper
+    app.kubernetes.io/part-of: nrdot-host
+    app.kubernetes.io/version: "1.0.0"
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nrdot
+      app.kubernetes.io/component: privileged-helper
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: nrdot
+        app.kubernetes.io/component: privileged-helper
+        app.kubernetes.io/part-of: nrdot-host
+        app.kubernetes.io/version: "1.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8084"
+        prometheus.io/path: "/metrics"
+        container.apparmor.security.beta.kubernetes.io/privileged-helper: unconfined
+    spec:
+      serviceAccountName: nrdot-privileged-helper
+      hostPID: true
+      hostNetwork: false
+      dnsPolicy: ClusterFirstWithHostNet
+      securityContext:
+        seccompProfile:
+          type: Unconfined
+      containers:
+      - name: privileged-helper
+        image: docker.io/newrelic/nrdot-privileged-helper:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: socket
+          containerPort: 8090
+          protocol: TCP
+        - name: metrics
+          containerPort: 8084
+          protocol: TCP
+        env:
+        - name: NRDOT_PRIVILEGED_ALLOWED_UIDS
+          value: "10001"
+        - name: NRDOT_PRIVILEGED_RATE_LIMIT
+          value: "100/minute"
+        - name: NRDOT_LOG_LEVEL
+          value: "info"
+        - name: NRDOT_PRIVILEGED_AUDIT_LOG
+          value: "/var/log/nrdot/privileged-audit.log"
+        - name: NRDOT_PRIVILEGED_SOCKET_PATH
+          value: "/var/run/nrdot/privileged-helper.sock"
+        - name: NRDOT_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: NRDOT_POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: NRDOT_POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        volumeMounts:
+        - name: socket-dir
+          mountPath: /var/run/nrdot
+        - name: proc
+          mountPath: /host/proc
+          readOnly: true
+        - name: sys
+          mountPath: /host/sys
+          readOnly: true
+        - name: root
+          mountPath: /host/root
+          readOnly: true
+          mountPropagation: HostToContainer
+        - name: var-run
+          mountPath: /var/run
+          readOnly: true
+        - name: var-lib
+          mountPath: /var/lib
+          readOnly: true
+        - name: logs
+          mountPath: /var/log/nrdot
+        - name: temp
+          mountPath: /tmp
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 250m
+            memory: 256Mi
+        livenessProbe:
+          exec:
+            command:
+            - test
+            - -S
+            - /var/run/nrdot/privileged-helper.sock
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          exec:
+            command:
+            - test
+            - -S
+            - /var/run/nrdot/privileged-helper.sock
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        securityContext:
+          privileged: false
+          runAsUser: 0  # Needs root for certain operations
+          allowPrivilegeEscalation: true
+          readOnlyRootFilesystem: false  # Needs to write audit logs
+          capabilities:
+            add:
+            - SYS_PTRACE
+            - DAC_READ_SEARCH
+            - SYS_ADMIN  # For namespace operations
+            drop:
+            - ALL
+      volumes:
+      - name: socket-dir
+        hostPath:
+          path: /var/run/nrdot
+          type: DirectoryOrCreate
+      - name: proc
+        hostPath:
+          path: /proc
+          type: Directory
+      - name: sys
+        hostPath:
+          path: /sys
+          type: Directory
+      - name: root
+        hostPath:
+          path: /
+          type: Directory
+      - name: var-run
+        hostPath:
+          path: /var/run
+          type: Directory
+      - name: var-lib
+        hostPath:
+          path: /var/lib
+          type: Directory
+      - name: logs
+        emptyDir: {}
+      - name: temp
+        emptyDir: {}
+      tolerations:
+      - key: node-role.kubernetes.io/control-plane
+        operator: Exists
+        effect: NoSchedule
+      - key: node-role.kubernetes.io/master
+        operator: Exists
+        effect: NoSchedule
+      - key: node.kubernetes.io/not-ready
+        operator: Exists
+        effect: NoExecute
+        tolerationSeconds: 300
+      - key: node.kubernetes.io/unreachable
+        operator: Exists
+        effect: NoExecute
+        tolerationSeconds: 300
+      - key: node.kubernetes.io/disk-pressure
+        operator: Exists
+        effect: NoSchedule
+      - key: node.kubernetes.io/memory-pressure
+        operator: Exists
+        effect: NoSchedule
+      - key: node.kubernetes.io/pid-pressure
+        operator: Exists
+        effect: NoSchedule
+      - key: node.kubernetes.io/unschedulable
+        operator: Exists
+        effect: NoSchedule
+      - key: node.kubernetes.io/network-unavailable
+        operator: Exists
+        effect: NoSchedule
+      - key: dedicated
+        operator: Equal
+        value: monitoring
+        effect: NoSchedule
+      nodeSelector:
+        kubernetes.io/os: linux
+      priorityClassName: system-node-critical

@@ -1,0 +1,134 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nrdot-config-engine
+  namespace: nrdot-system
+  labels:
+    app.kubernetes.io/name: nrdot
+    app.kubernetes.io/component: config-engine
+    app.kubernetes.io/part-of: nrdot-host
+    app.kubernetes.io/version: "1.0.0"
+spec:
+  replicas: 1  # Config engine should be singleton
+  strategy:
+    type: Recreate  # Ensures only one instance at a time
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nrdot
+      app.kubernetes.io/component: config-engine
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: nrdot
+        app.kubernetes.io/component: config-engine
+        app.kubernetes.io/part-of: nrdot-host
+        app.kubernetes.io/version: "1.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8081"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: nrdot-config-engine
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: config-engine
+        image: docker.io/newrelic/nrdot-config-engine:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: health
+          containerPort: 8081
+          protocol: TCP
+        - name: metrics
+          containerPort: 8082
+          protocol: TCP
+        env:
+        - name: NRDOT_CONFIG_ENGINE_MODE
+          value: "watch"
+        - name: NRDOT_CONFIG_PATH
+          value: "/etc/nrdot/source/nrdot-config.yaml"
+        - name: NRDOT_WATCH_INTERVAL
+          value: "30s"
+        - name: NRDOT_LOG_LEVEL
+          value: "info"
+        - name: NRDOT_VALIDATION_ENABLED
+          value: "true"
+        - name: GOMAXPROCS
+          valueFrom:
+            resourceFieldRef:
+              resource: limits.cpu
+        - name: GOMEMLIMIT
+          valueFrom:
+            resourceFieldRef:
+              resource: limits.memory
+        volumeMounts:
+        - name: config-source
+          mountPath: /etc/nrdot/source
+          readOnly: true
+        - name: config-output
+          mountPath: /etc/nrdot/output
+        - name: temp
+          mountPath: /tmp
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: health
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: health
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 10001
+          capabilities:
+            drop:
+            - ALL
+      volumes:
+      - name: config-source
+        configMap:
+          name: nrdot-config
+      - name: config-output
+        emptyDir: {}
+      - name: temp
+        emptyDir: {}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app.kubernetes.io/component
+                  operator: In
+                  values:
+                  - config-engine
+              topologyKey: kubernetes.io/hostname
+      tolerations:
+      - key: "dedicated"
+        operator: "Equal"
+        value: "monitoring"
+        effect: "NoSchedule"
+      nodeSelector:
+        kubernetes.io/os: linux
+      priorityClassName: system-cluster-critical
