@@ -1,0 +1,81 @@
+# Example NRDOT-Host Configuration for local testing
+license_key: 1234567890abcdef1234567890abcdef12345678
+
+# Custom attributes for this host
+custom_attributes:
+  environment: development
+  team: platform
+  role: demo
+  hostname: localhost
+
+# Host monitoring configuration
+host_monitoring:
+  enabled: true
+  collection_interval: 30s
+  
+  # CPU monitoring
+  cpu:
+    enabled: true
+    
+  # Memory monitoring
+  memory:
+    enabled: true
+    
+  # Disk monitoring
+  disk:
+    enabled: true
+    mount_points:
+      - /
+      
+  # Network monitoring
+  network:
+    enabled: true
+
+# Process monitoring
+process_monitoring:
+  enabled: true
+
+# OTLP receiver configuration
+otlp:
+  enabled: true
+  grpc:
+    endpoint: 0.0.0.0:4317
+  http:
+    endpoint: 0.0.0.0:4318
+
+# Resource limits
+resource_limits:
+  memory_limit_mib: 256
+  memory_spike_limit_mib: 64
+  check_interval: 1s
+
+# Batch processing configuration
+batch:
+  timeout: 5s
+  send_batch_size: 500
+
+# Logging configuration  
+logging:
+  level: info
+  format: json
+
+# Debug configuration
+debug:
+  enabled: true
+  metrics:
+    address: :8888
+
+# Exporter configuration - for testing, we'll use logging
+exporters:
+  - logging:
+      loglevel: info
+      sampling_initial: 10
+      sampling_thereafter: 50
+
+# Service definition
+service:
+  pipelines:
+    metrics:
+      receivers: [hostmetrics, otlp]
+      processors: [batch, memory_limiter]
+      exporters: [logging]
