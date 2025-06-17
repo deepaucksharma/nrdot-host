@@ -1,0 +1,171 @@
+name: Bug Report
+description: Report a bug in NRDOT-HOST
+title: "[BUG] "
+labels: ["bug", "triage"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill out this bug report! Please provide as much detail as possible to help us resolve the issue quickly.
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-submission Checklist
+      description: Please check all applicable boxes before submitting
+      options:
+        - label: I have searched the existing issues to ensure this bug hasn't been reported
+          required: true
+        - label: I have checked the [troubleshooting guide](https://github.com/deepaucksharma/nrdot-host/blob/main/docs/troubleshooting.md)
+          required: true
+        - label: I am running the latest version of NRDOT-HOST
+          required: false
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of what the bug is
+      placeholder: |
+        When I try to start NRDOT-HOST with custom configuration, the service fails with...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Steps to reproduce the behavior
+      placeholder: |
+        1. Create config file with...
+        2. Run command...
+        3. See error...
+      value: |
+        1. 
+        2. 
+        3. 
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What you expected to happen
+      placeholder: The service should start successfully and begin collecting metrics
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happened
+      placeholder: The service fails to start with error message...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: NRDOT-HOST Version
+      description: Output of `nrdot-ctl version`
+      placeholder: v1.0.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      description: What OS are you running on?
+      options:
+        - Ubuntu 20.04
+        - Ubuntu 22.04
+        - Debian 11
+        - Debian 12
+        - RHEL 8
+        - RHEL 9
+        - CentOS 8
+        - CentOS 9
+        - Amazon Linux 2
+        - macOS 12
+        - macOS 13
+        - Windows Server 2019
+        - Windows Server 2022
+        - Other (specify in description)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment Method
+      description: How is NRDOT-HOST deployed?
+      options:
+        - systemd (Linux package)
+        - Docker
+        - Kubernetes (Helm)
+        - Kubernetes (Manual)
+        - Binary installation
+        - Source build
+    validations:
+      required: true
+
+  - type: textarea
+    id: configuration
+    attributes:
+      label: Configuration
+      description: |
+        Relevant configuration (please remove sensitive information like license keys)
+        Tip: You can use `nrdot-ctl config show --sanitize` to get sanitized config
+      render: yaml
+      placeholder: |
+        service:
+          name: my-service
+        
+        processors:
+          nrsecurity:
+            redact_secrets: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs
+      description: |
+        Please include relevant log output. You can get logs with:
+        - `journalctl -u nrdot-host --no-pager -n 100`
+        - `nrdot-ctl logs --tail 100`
+      render: shell
+      placeholder: |
+        ERROR Failed to start collector error="invalid configuration: license_key is required"
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics Output
+      description: |
+        If possible, please run `nrdot-ctl diagnostics` and include relevant output
+      render: shell
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: |
+        Add any other context about the problem here. This might include:
+        - Screenshots
+        - Related issues
+        - Workarounds you've tried
+        - Impact on your environment
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Code of Conduct
+      description: By submitting this issue, you agree to follow our Code of Conduct
+      options:
+        - label: I agree to follow this project's Code of Conduct
+          required: true

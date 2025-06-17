@@ -1,0 +1,70 @@
+name: Documentation Issue
+description: Report issues or improvements for documentation
+title: "[DOCS] "
+labels: ["documentation", "triage"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping us improve our documentation!
+
+  - type: dropdown
+    id: doc-type
+    attributes:
+      label: Documentation Type
+      description: What type of documentation issue is this?
+      options:
+        - Error/Inaccuracy
+        - Missing Information
+        - Unclear Instructions
+        - Broken Links
+        - Code Example Issue
+        - New Documentation Needed
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: page
+    attributes:
+      label: Page/Section
+      description: Which documentation page or section is affected?
+      placeholder: docs/configuration.md#processor-configuration
+    validations:
+      required: true
+
+  - type: textarea
+    id: issue
+    attributes:
+      label: Issue Description
+      description: Describe the issue with the documentation
+      placeholder: |
+        The example configuration for the nrsecurity processor is missing the required 'enabled' field...
+    validations:
+      required: true
+
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested Improvement
+      description: How should this be fixed or improved?
+      placeholder: |
+        Add the 'enabled: true' field to the example configuration...
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Any other relevant information
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      options:
+        - label: I am willing to submit a PR to fix this
+          required: false

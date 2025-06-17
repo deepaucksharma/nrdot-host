@@ -1,0 +1,138 @@
+name: Feature Request
+description: Suggest an idea for NRDOT-HOST
+title: "[FEATURE] "
+labels: ["enhancement", "triage"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to suggest a new feature! Please provide as much detail as possible.
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-submission Checklist
+      options:
+        - label: I have searched existing issues to ensure this feature hasn't been requested
+          required: true
+        - label: I have checked the roadmap/discussions for similar features
+          required: true
+
+  - type: dropdown
+    id: feature-type
+    attributes:
+      label: Feature Type
+      description: What type of feature are you requesting?
+      options:
+        - New Processor
+        - Configuration Enhancement
+        - Performance Improvement
+        - Security Enhancement
+        - Integration/Compatibility
+        - Documentation
+        - CLI Enhancement
+        - Monitoring/Observability
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement
+      description: |
+        Please describe the problem you're trying to solve. 
+        What are you trying to do that you can't do today?
+      placeholder: |
+        Currently, NRDOT-HOST doesn't support filtering metrics based on custom business logic...
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: |
+        Describe the solution you'd like to see implemented.
+        How would this work from a user's perspective?
+      placeholder: |
+        Add a new processor that allows custom filtering rules using a DSL...
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: |
+        Have you considered any alternative solutions or workarounds?
+        Why are they not sufficient?
+      placeholder: |
+        I tried using the transform processor but it doesn't support...
+
+  - type: textarea
+    id: example-config
+    attributes:
+      label: Example Configuration
+      description: |
+        If applicable, show how this feature might be configured
+      render: yaml
+      placeholder: |
+        processors:
+          custom_filter:
+            rules:
+              - condition: 'metric.name =~ "test.*"'
+                action: drop
+
+  - type: textarea
+    id: use-cases
+    attributes:
+      label: Use Cases
+      description: |
+        Describe specific use cases for this feature.
+        Who would benefit and how?
+      placeholder: |
+        1. Teams with high-cardinality metrics could use this to...
+        2. Multi-tenant environments would benefit from...
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      description: How important is this feature to you?
+      options:
+        - Critical - Blocking production use
+        - High - Significantly improves my workflow
+        - Medium - Would be nice to have
+        - Low - Minor improvement
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      options:
+        - label: I am willing to contribute this feature
+          required: false
+        - label: I would like guidance on implementing this feature
+          required: false
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: |
+        Add any other context, mockups, or examples about the feature request here.
+        You can drag and drop images into this field.
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Code of Conduct
+      description: By submitting this issue, you agree to follow our Code of Conduct
+      options:
+        - label: I agree to follow this project's Code of Conduct
+          required: true

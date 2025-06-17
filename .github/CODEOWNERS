@@ -1,0 +1,89 @@
+# CODEOWNERS for NRDOT-HOST
+# 
+# This file defines who is responsible for code in this repository.
+# These owners will be automatically requested for review when someone
+# opens a pull request that modifies code they own.
+#
+# Format: <pattern> <owner1> <owner2> ...
+# Order matters: the last matching pattern takes precedence
+
+# Default owners for everything in the repo
+*                                       @deepaucksharma
+
+# Documentation
+/docs/                                  @deepaucksharma
+*.md                                    @deepaucksharma
+/README.md                              @deepaucksharma
+
+# Core Components
+/nrdot-ctl/                            @deepaucksharma
+/nrdot-supervisor/                     @deepaucksharma
+/nrdot-config-engine/                  @deepaucksharma
+/nrdot-api-server/                     @deepaucksharma
+
+# Libraries
+/nrdot-schema/                         @deepaucksharma
+/nrdot-template-lib/                   @deepaucksharma
+/nrdot-telemetry-client/               @deepaucksharma
+/nrdot-privileged-helper/              @deepaucksharma
+
+# OpenTelemetry Processors
+/otel-processor-common/                @deepaucksharma
+/otel-processor-nrsecurity/            @deepaucksharma
+/otel-processor-nrenrich/              @deepaucksharma
+/otel-processor-nrtransform/           @deepaucksharma
+/otel-processor-nrcap/                 @deepaucksharma
+
+# Build and CI/CD
+/Makefile                              @deepaucksharma
+/.github/                              @deepaucksharma
+/.github/workflows/                    @deepaucksharma
+/otelcol-builder/                      @deepaucksharma
+
+# Docker
+/docker/                               @deepaucksharma
+**/Dockerfile                          @deepaucksharma
+**/.dockerignore                       @deepaucksharma
+
+# Kubernetes / Helm
+/kubernetes/                           @deepaucksharma
+/kubernetes/helm/                      @deepaucksharma
+
+# Testing
+/integration-tests/                    @deepaucksharma
+/e2e-tests/                           @deepaucksharma
+**/*_test.go                          @deepaucksharma
+
+# Examples and Demos
+/examples/                             @deepaucksharma
+
+# Scripts and Tools
+/scripts/                              @deepaucksharma
+/tools/                                @deepaucksharma
+
+# Security-sensitive files
+**/security*.go                        @deepaucksharma
+**/auth*.go                           @deepaucksharma
+**/privileged*.go                     @deepaucksharma
+/SECURITY.md                          @deepaucksharma
+
+# Configuration files
+*.yaml                                 @deepaucksharma
+*.yml                                  @deepaucksharma
+*.json                                 @deepaucksharma
+*.toml                                 @deepaucksharma
+
+# Legal and licensing
+/LICENSE                               @deepaucksharma
+/NOTICE                                @deepaucksharma
+/CONTRIBUTING.md                       @deepaucksharma
+
+# Dependencies
+go.mod                                 @deepaucksharma
+go.sum                                 @deepaucksharma
+**/go.mod                             @deepaucksharma
+**/go.sum                             @deepaucksharma
+
+# Special files that need careful review
+/nrdot-privileged-helper/cmd/         @deepaucksharma
+/otel-processor-nrsecurity/pkg/       @deepaucksharma

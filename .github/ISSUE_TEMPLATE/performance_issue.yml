@@ -1,0 +1,147 @@
+name: Performance Issue
+description: Report performance problems with NRDOT-HOST
+title: "[PERF] "
+labels: ["performance", "triage"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a performance issue. Please provide detailed metrics to help us investigate.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Performance Issue Description
+      description: Describe the performance problem you're experiencing
+      placeholder: |
+        NRDOT-HOST is consuming 100% CPU when processing more than 1000 metrics/second...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: NRDOT-HOST Version
+      placeholder: v1.0.0
+    validations:
+      required: true
+
+  - type: textarea
+    id: metrics
+    attributes:
+      label: Performance Metrics
+      description: |
+        Please provide relevant performance metrics:
+        - CPU usage
+        - Memory usage
+        - Data throughput (metrics/traces/logs per second)
+        - Processing latency
+      placeholder: |
+        CPU: 95-100% (4 cores)
+        Memory: 2.5GB (growing)
+        Throughput: 5000 metrics/sec
+        Latency: 500ms average
+    validations:
+      required: true
+
+  - type: textarea
+    id: configuration
+    attributes:
+      label: Configuration
+      description: Relevant configuration (sanitized)
+      render: yaml
+      placeholder: |
+        processors:
+          nrenrich:
+            kubernetes:
+              enabled: true
+          nrcap:
+            limits:
+              global: 1000000
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected Component
+      description: Which component seems to be causing the issue?
+      options:
+        - Unknown
+        - Collector (overall)
+        - nrsecurity processor
+        - nrenrich processor
+        - nrtransform processor
+        - nrcap processor
+        - Receivers
+        - Exporters
+        - Supervisor
+        - Config Engine
+      multiple: true
+
+  - type: textarea
+    id: profile
+    attributes:
+      label: Profiling Data
+      description: |
+        If possible, attach profiling data:
+        - CPU profile: `nrdot-ctl profile cpu --duration 60s`
+        - Memory profile: `nrdot-ctl profile memory`
+        - Trace: `nrdot-ctl trace --duration 10s`
+      render: shell
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment Details
+      description: System specifications and deployment details
+      placeholder: |
+        - OS: Ubuntu 20.04
+        - CPU: 4 cores (Intel Xeon)
+        - Memory: 8GB
+        - Deployment: Kubernetes
+        - Other services: Prometheus, Grafana
+
+  - type: textarea
+    id: timeline
+    attributes:
+      label: Performance Timeline
+      description: When did this issue start? Any recent changes?
+      placeholder: |
+        - Issue started: 2 days ago
+        - Recent changes: Upgraded from v0.9.0 to v1.0.0
+        - Correlation: Started after enabling Kubernetes enrichment
+
+  - type: textarea
+    id: workarounds
+    attributes:
+      label: Attempted Workarounds
+      description: What have you tried to resolve this issue?
+      placeholder: |
+        - Increased memory limit to 4GB
+        - Disabled nrenrich processor
+        - Reduced cardinality limits
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: Business Impact
+      description: How is this affecting your operations?
+      placeholder: |
+        - Data loss: Missing 10% of metrics
+        - Alerting delays: 5-minute lag
+        - Cost impact: Had to scale up instances
+
+  - type: checkboxes
+    id: data
+    attributes:
+      label: Additional Data
+      options:
+        - label: I can provide a data sample that reproduces this issue
+          required: false
+        - label: I can provide access to a test environment
+          required: false
+        - label: I have collected debug logs during the issue
+          required: false
