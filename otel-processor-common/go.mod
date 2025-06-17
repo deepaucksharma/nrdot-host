@@ -3,7 +3,7 @@ module github.com/newrelic/nrdot-host/otel-processor-common
 go 1.21
 
 require (
-	github.com/stretchr/testify v1.9.0
+	github.com/stretchr/testify v1.10.0
 	go.opentelemetry.io/collector/component v0.96.0
 	go.opentelemetry.io/collector/consumer v0.96.0
 	go.opentelemetry.io/collector/pdata v1.3.0
