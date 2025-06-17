@@ -128,3 +128,7 @@ The codebase follows a 7-layer architecture as defined in DEPENDENCIES.md:
 - Integration tests: In `nrdot-test-integration/`
 - 24/7 validation: `nrdot-validation-fleet/` contains continuous validation suite
 - Compliance tests: `nrdot-test-compliance/` for standards verification
+
+## Development Best Practices
+
+- Push all changes after every step is completed

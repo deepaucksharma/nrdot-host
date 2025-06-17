@@ -1,0 +1,24 @@
+apiVersion: v2
+name: nrdot
+description: A Helm chart for NRDOT - New Relic Data Optimization Tool
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - monitoring
+  - observability
+  - telemetry
+  - opentelemetry
+  - newrelic
+  - optimization
+home: https://github.com/newrelic/nrdot
+sources:
+  - https://github.com/newrelic/nrdot
+maintainers:
+  - name: NRDOT Team
+    email: nrdot@newrelic.com
+icon: https://newrelic.com/favicon.ico
+annotations:
+  category: Monitoring
+  licenses: Apache-2.0
+dependencies: []

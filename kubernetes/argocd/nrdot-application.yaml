@@ -1,0 +1,150 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: nrdot
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: nrdot
+    app.kubernetes.io/part-of: nrdot-host
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/newrelic/nrdot
+    targetRevision: HEAD
+    path: kubernetes/helm/nrdot
+    helm:
+      releaseName: nrdot
+      values: |
+        newrelic:
+          licenseKeySecretName: nrdot-license
+        collector:
+          replicaCount: 3
+          autoscaling:
+            enabled: true
+        apiServer:
+          ingress:
+            enabled: true
+            hosts:
+              - host: nrdot-api.example.com
+                paths:
+                  - path: /
+                    pathType: Prefix
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: nrdot-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+    - CreateNamespace=true
+    - PrunePropagationPolicy=foreground
+    - PruneLast=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+  revisionHistoryLimit: 10
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: nrdot-environments
+  namespace: argocd
+spec:
+  generators:
+  - list:
+      elements:
+      - cluster: dev
+        url: https://dev-cluster.example.com
+        namespace: nrdot-dev
+        values: values-dev.yaml
+      - cluster: staging
+        url: https://staging-cluster.example.com
+        namespace: nrdot-staging
+        values: values-staging.yaml
+      - cluster: prod
+        url: https://prod-cluster.example.com
+        namespace: nrdot-production
+        values: values-prod.yaml
+  template:
+    metadata:
+      name: 'nrdot-{{cluster}}'
+      namespace: argocd
+      labels:
+        environment: '{{cluster}}'
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/newrelic/nrdot
+        targetRevision: HEAD
+        path: kubernetes/helm/nrdot
+        helm:
+          valueFiles:
+          - '{{values}}'
+      destination:
+        server: '{{url}}'
+        namespace: '{{namespace}}'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+        - CreateNamespace=true
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: nrdot-repo
+  namespace: argocd
+  labels:
+    argocd.argoproj.io/secret-type: repository
+type: Opaque
+stringData:
+  type: git
+  url: https://github.com/newrelic/nrdot
+  # If private repo, add credentials:
+  # username: your-username
+  # password: your-token
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: nrdot-project
+  namespace: argocd
+spec:
+  description: NRDOT monitoring infrastructure
+  sourceRepos:
+  - 'https://github.com/newrelic/nrdot'
+  - 'https://newrelic.github.io/nrdot-helm-charts'
+  destinations:
+  - namespace: 'nrdot-*'
+    server: '*'
+  clusterResourceWhitelist:
+  - group: ''
+    kind: Namespace
+  - group: rbac.authorization.k8s.io
+    kind: ClusterRole
+  - group: rbac.authorization.k8s.io
+    kind: ClusterRoleBinding
+  namespaceResourceWhitelist:
+  - group: '*'
+    kind: '*'
+  orphanedResources:
+    warn: true
+  roles:
+  - name: admin
+    policies:
+    - p, proj:nrdot-project:admin, applications, *, nrdot-project/*, allow
+    groups:
+    - platform-team
+  - name: read-only
+    policies:
+    - p, proj:nrdot-project:read-only, applications, get, nrdot-project/*, allow
+    groups:
+    - developers

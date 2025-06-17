@@ -1,0 +1,182 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1beta2
+kind: Kustomization
+metadata:
+  name: nrdot-infrastructure
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: ./kubernetes/manifests
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: nrdot
+  validation: client
+  timeout: 5m
+  # Dependency ordering
+  dependsOn:
+    - name: cert-manager
+    - name: nginx-ingress
+  # Health checks
+  healthChecks:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: nrdot-collector
+      namespace: nrdot-system
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: nrdot-api-server
+      namespace: nrdot-system
+  # Post build variable substitution
+  postBuild:
+    substitute:
+      cluster_name: "${CLUSTER_NAME}"
+      region: "${AWS_REGION}"
+    substituteFrom:
+      - kind: ConfigMap
+        name: cluster-config
+      - kind: Secret
+        name: nrdot-secrets
+---
+apiVersion: helm.toolkit.fluxcd.io/v2beta1
+kind: HelmRelease
+metadata:
+  name: nrdot
+  namespace: flux-system
+spec:
+  releaseName: nrdot
+  targetNamespace: nrdot-system
+  interval: 10m
+  chart:
+    spec:
+      chart: nrdot
+      version: "1.0.0"
+      sourceRef:
+        kind: HelmRepository
+        name: nrdot-charts
+      interval: 1h
+  install:
+    createNamespace: true
+    remediation:
+      retries: 3
+  upgrade:
+    remediation:
+      retries: 3
+      remediateLastFailure: true
+    cleanupOnFail: true
+  rollback:
+    timeout: 10m
+    recreate: true
+    cleanupOnFail: true
+  values:
+    global:
+      logLevel: info
+    collector:
+      replicaCount: 3
+      autoscaling:
+        enabled: true
+  valuesFrom:
+    - kind: Secret
+      name: nrdot-values
+      valuesKey: values.yaml
+  # Dependencies
+  dependsOn:
+    - name: cert-manager
+      namespace: cert-manager
+    - name: nginx-ingress
+      namespace: ingress-nginx
+  # Tests
+  test:
+    enable: true
+  # Monitoring
+  serviceAccountName: nrdot-flux
+  postRenderers:
+    - kustomize:
+        patchesStrategicMerge:
+          - apiVersion: apps/v1
+            kind: Deployment
+            metadata:
+              name: nrdot-collector
+            spec:
+              template:
+                metadata:
+                  annotations:
+                    fluxcd.io/automated: "true"
+---
+apiVersion: notification.toolkit.fluxcd.io/v1beta1
+kind: Alert
+metadata:
+  name: nrdot-alerts
+  namespace: flux-system
+spec:
+  providerRef:
+    name: slack
+  eventSeverity: error
+  eventSources:
+    - kind: GitRepository
+      name: nrdot
+    - kind: Kustomization
+      name: nrdot-infrastructure
+    - kind: HelmRelease
+      name: nrdot
+  summary: 'NRDOT deployment issue in cluster {{.ClusterName}}'
+---
+apiVersion: notification.toolkit.fluxcd.io/v1beta1
+kind: Provider
+metadata:
+  name: slack
+  namespace: flux-system
+spec:
+  type: slack
+  channel: platform-alerts
+  secretRef:
+    name: slack-webhook
+---
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImageRepository
+metadata:
+  name: nrdot-collector
+  namespace: flux-system
+spec:
+  image: docker.io/newrelic/nrdot-collector
+  interval: 1h
+  provider: generic
+---
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImagePolicy
+metadata:
+  name: nrdot-collector
+  namespace: flux-system
+spec:
+  imageRepositoryRef:
+    name: nrdot-collector
+  policy:
+    semver:
+      range: '>=1.0.0'
+---
+apiVersion: image.toolkit.fluxcd.io/v1beta1
+kind: ImageUpdateAutomation
+metadata:
+  name: nrdot-images
+  namespace: flux-system
+spec:
+  interval: 10m
+  sourceRef:
+    kind: GitRepository
+    name: nrdot
+  git:
+    checkout:
+      ref:
+        branch: main
+    commit:
+      author:
+        email: fluxcdbot@example.com
+        name: fluxcdbot
+      messageTemplate: |
+        Automated image update
+        
+        [ci skip]
+    push:
+      branch: main
+  update:
+    path: "./kubernetes"
+    strategy: Setters

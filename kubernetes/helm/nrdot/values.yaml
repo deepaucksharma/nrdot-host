@@ -1,0 +1,457 @@
+# Default values for nrdot.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+global:
+  # Global image registry
+  imageRegistry: ""
+  # Global image pull secrets
+  imagePullSecrets: []
+  # Storage class for persistent volumes
+  storageClass: ""
+  # Node selector for all components
+  nodeSelector: {}
+  # Tolerations for all components
+  tolerations: []
+  # Security context for all pods
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    fsGroup: 10001
+    seccompProfile:
+      type: RuntimeDefault
+
+# New Relic configuration
+newrelic:
+  # License key (required)
+  licenseKey: ""
+  # Existing secret with license key
+  licenseKeySecretName: ""
+  licenseKeySecretKey: "NEW_RELIC_LICENSE_KEY"
+  # OTLP endpoint
+  otlpEndpoint: "otlp.nr-data.net:4317"
+  # API endpoint
+  apiEndpoint: "https://api.newrelic.com"
+  # EU datacenter
+  euDatacenter: false
+
+# Namespace configuration
+namespace:
+  create: true
+  name: nrdot-system
+  labels: {}
+  annotations: {}
+
+# Service account configuration
+serviceAccount:
+  # Specifies whether service accounts should be created
+  create: true
+  # Annotations to add to the service accounts
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+# RBAC configuration
+rbac:
+  # Specifies whether RBAC resources should be created
+  create: true
+  # Pod Security Policy
+  pspEnabled: false
+
+# Config Engine
+configEngine:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: docker.io/newrelic/nrdot-config-engine
+    pullPolicy: IfNotPresent
+    tag: ""
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  config:
+    watchInterval: "30s"
+    validationEnabled: true
+  podAnnotations: {}
+  podSecurityContext: {}
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    runAsUser: 10001
+    capabilities:
+      drop:
+      - ALL
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  priorityClassName: "system-cluster-critical"
+
+# Supervisor
+supervisor:
+  enabled: true
+  replicaCount: 2
+  image:
+    repository: docker.io/newrelic/nrdot-supervisor
+    pullPolicy: IfNotPresent
+    tag: ""
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+  config:
+    restartStrategy: "exponential"
+    maxRestarts: 5
+  podAnnotations: {}
+  podSecurityContext: {}
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    runAsUser: 10001
+    capabilities:
+      drop:
+      - ALL
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  priorityClassName: "system-cluster-critical"
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+# Collector
+collector:
+  enabled: true
+  replicaCount: 3
+  image:
+    repository: docker.io/newrelic/nrdot-collector
+    pullPolicy: IfNotPresent
+    tag: ""
+  resources:
+    limits:
+      cpu: 4000m
+      memory: 4Gi
+    requests:
+      cpu: 1000m
+      memory: 2Gi
+  config:
+    # Additional collector configuration
+    processors:
+      batch:
+        sendBatchSize: 1000
+        timeout: 10s
+      memoryLimiter:
+        checkInterval: 5s
+        limitPercentage: 80
+        spikeLimitPercentage: 25
+  service:
+    type: LoadBalancer
+    annotations: {}
+    ports:
+      otlpGrpc:
+        port: 4317
+        targetPort: 4317
+      otlpHttp:
+        port: 4318
+        targetPort: 4318
+  ingress:
+    enabled: false
+    className: "nginx"
+    annotations: {}
+    hosts:
+      - host: collector.nrdot.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+  podAnnotations: {}
+  podSecurityContext: {}
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    runAsUser: 10001
+    capabilities:
+      drop:
+      - ALL
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  priorityClassName: "system-cluster-critical"
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 2
+
+# API Server
+apiServer:
+  enabled: true
+  replicaCount: 2
+  image:
+    repository: docker.io/newrelic/nrdot-api-server
+    pullPolicy: IfNotPresent
+    tag: ""
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+  config:
+    port: 8080
+    authEnabled: true
+    authToken: ""
+    authTokenSecretName: ""
+    authTokenSecretKey: "API_AUTH_TOKEN"
+    tlsEnabled: true
+    corsEnabled: false
+    metricsEnabled: true
+    readTimeout: "30s"
+    writeTimeout: "30s"
+  service:
+    type: LoadBalancer
+    annotations: {}
+    port: 443
+    targetPort: 8080
+  ingress:
+    enabled: false
+    className: "nginx"
+    annotations: {}
+    hosts:
+      - host: api.nrdot.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 60
+    targetMemoryUtilizationPercentage: 75
+  podAnnotations: {}
+  podSecurityContext: {}
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    runAsUser: 10001
+    capabilities:
+      drop:
+      - ALL
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  priorityClassName: "system-node-critical"
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+# Privileged Helper (DaemonSet)
+privilegedHelper:
+  enabled: true
+  image:
+    repository: docker.io/newrelic/nrdot-privileged-helper
+    pullPolicy: IfNotPresent
+    tag: ""
+  resources:
+    limits:
+      cpu: 250m
+      memory: 256Mi
+    requests:
+      cpu: 50m
+      memory: 64Mi
+  config:
+    allowedUids: "10001"
+    rateLimit: "100/minute"
+    auditLog: "/var/log/nrdot/privileged-audit.log"
+  podAnnotations: {}
+  securityContext:
+    privileged: false
+    runAsUser: 0
+    allowPrivilegeEscalation: true
+    readOnlyRootFilesystem: false
+    capabilities:
+      add:
+      - SYS_PTRACE
+      - DAC_READ_SEARCH
+      - SYS_ADMIN
+      drop:
+      - ALL
+  nodeSelector: {}
+  tolerations:
+    - key: node-role.kubernetes.io/control-plane
+      operator: Exists
+      effect: NoSchedule
+    - key: node-role.kubernetes.io/master
+      operator: Exists
+      effect: NoSchedule
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  priorityClassName: "system-node-critical"
+  podDisruptionBudget:
+    enabled: true
+    maxUnavailable: "33%"
+
+# Network policies
+networkPolicy:
+  enabled: true
+  # Allow ingress from these namespaces (empty = all namespaces)
+  allowedNamespaces: []
+  # Additional custom policies
+  additionalPolicies: []
+
+# TLS configuration
+tls:
+  enabled: true
+  # Use cert-manager for automatic certificate management
+  certManager:
+    enabled: false
+    issuerRef:
+      name: letsencrypt-prod
+      kind: ClusterIssuer
+  # Manual TLS certificate
+  manual:
+    cert: ""
+    key: ""
+    ca: ""
+
+# Monitoring integration
+monitoring:
+  # ServiceMonitor for Prometheus Operator
+  serviceMonitor:
+    enabled: false
+    namespace: ""
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}
+  # Grafana dashboards
+  grafana:
+    enabled: false
+    dashboards: {}
+
+# Configuration management
+configuration:
+  # Main NRDOT configuration
+  nrdotConfig: |
+    global:
+      deployment_environment: kubernetes
+      log_level: info
+      metrics_enabled: true
+      tracing_enabled: true
+    telemetry:
+      collection_interval: 30s
+      batch_size: 1000
+      queue_size: 10000
+    security:
+      tls:
+        enabled: true
+      authentication:
+        enabled: true
+      data_redaction:
+        enabled: true
+    cardinality:
+      enabled: true
+      limits:
+        - metric_name: "*"
+          max_cardinality: 100000
+          action: drop_new
+    enrichment:
+      metadata:
+        - source: kubernetes
+          target_attributes:
+            - k8s.namespace.name
+            - k8s.pod.name
+            - k8s.deployment.name
+    transformations:
+      metrics:
+        - type: aggregate
+          match: "container_*"
+          group_by: ["k8s.namespace.name", "k8s.pod.name"]
+          interval: 60s
+    exporters:
+      newrelic:
+        enabled: true
+        compression: gzip
+        timeout: 30s
+
+  # OpenTelemetry Collector configuration
+  otelConfig: ""
+
+# Test configuration
+tests:
+  enabled: true
+  image:
+    repository: busybox
+    tag: "1.35"
+
+# Additional volumes and mounts
+extraVolumes: []
+extraVolumeMounts: []
+
+# Additional environment variables
+extraEnvVars: []
+extraEnvVarsSecret: ""
+
+# Pod labels and annotations
+commonLabels: {}
+commonAnnotations: {}
+
+# Lifecycle hooks
+lifecycleHooks: {}
+
+# Init containers
+initContainers: []
+
+# Sidecar containers
+sidecars: []
+
+# Host aliases
+hostAliases: []
+
+# Priority class name for non-critical workloads
+priorityClassName: ""
+
+# Topology spread constraints
+topologySpreadConstraints: []
+
+# Pod management policy (for StatefulSets)
+podManagementPolicy: Parallel
+
+# Update strategy
+updateStrategy:
+  type: RollingUpdate
+
+# Min ready seconds
+minReadySeconds: 0
+
+# Revision history limit
+revisionHistoryLimit: 10
+
+# Enable pod security policy
+podSecurityPolicy:
+  enabled: false
+
+# Enable pod security standards
+podSecurityStandards:
+  enabled: true
+  enforce: "restricted"
+  audit: "restricted"
+  warn: "restricted"

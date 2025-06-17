@@ -1,0 +1,557 @@
+apiVersion: template.openshift.io/v1
+kind: Template
+metadata:
+  name: nrdot
+  namespace: openshift
+  annotations:
+    description: "NRDOT - New Relic Data Optimization Tool for OpenShift"
+    iconClass: "icon-monitoring"
+    tags: "monitoring,observability,newrelic"
+    openshift.io/display-name: "NRDOT Monitoring Stack"
+    openshift.io/long-description: "This template deploys a complete NRDOT monitoring stack on OpenShift"
+    openshift.io/provider-display-name: "New Relic"
+    openshift.io/documentation-url: "https://github.com/newrelic/nrdot"
+    openshift.io/support-url: "https://github.com/newrelic/nrdot/issues"
+message: |
+  NRDOT has been deployed to project ${PROJECT_NAME}
+  
+  Collector endpoint: ${APPLICATION_NAME}-collector.${PROJECT_NAME}.svc.cluster.local:4317
+  API endpoint: https://${API_ROUTE_HOST}
+  
+  To get started, configure your applications to send telemetry to the collector endpoint.
+labels:
+  template: nrdot-template
+  app: nrdot
+objects:
+# Project/Namespace
+- apiVersion: project.openshift.io/v1
+  kind: Project
+  metadata:
+    name: ${PROJECT_NAME}
+    labels:
+      app: ${APPLICATION_NAME}
+    annotations:
+      openshift.io/description: "NRDOT Monitoring Infrastructure"
+      openshift.io/display-name: "NRDOT - ${ENVIRONMENT}"
+
+# Service Accounts
+- apiVersion: v1
+  kind: ServiceAccount
+  metadata:
+    name: ${APPLICATION_NAME}-collector
+    namespace: ${PROJECT_NAME}
+    labels:
+      app: ${APPLICATION_NAME}
+      component: collector
+
+- apiVersion: v1
+  kind: ServiceAccount
+  metadata:
+    name: ${APPLICATION_NAME}-privileged-helper
+    namespace: ${PROJECT_NAME}
+    labels:
+      app: ${APPLICATION_NAME}
+      component: privileged-helper
+
+# Security Context Constraints
+- apiVersion: security.openshift.io/v1
+  kind: SecurityContextConstraints
+  metadata:
+    name: ${APPLICATION_NAME}-privileged
+    labels:
+      app: ${APPLICATION_NAME}
+  allowPrivilegedContainer: false
+  allowPrivilegeEscalation: true
+  runAsUser:
+    type: RunAsAny
+  seLinuxContext:
+    type: MustRunAs
+  fsGroup:
+    type: RunAsAny
+  supplementalGroups:
+    type: RunAsAny
+  allowedCapabilities:
+  - SYS_PTRACE
+  - DAC_READ_SEARCH
+  volumes:
+  - configMap
+  - emptyDir
+  - projected
+  - secret
+  - downwardAPI
+  - persistentVolumeClaim
+  - hostPath
+  allowHostDirVolumePlugin: true
+  allowHostIPC: false
+  allowHostNetwork: false
+  allowHostPID: true
+  allowHostPorts: false
+  users:
+  - system:serviceaccount:${PROJECT_NAME}:${APPLICATION_NAME}-privileged-helper
+
+# ConfigMap
+- apiVersion: v1
+  kind: ConfigMap
+  metadata:
+    name: ${APPLICATION_NAME}-config
+    namespace: ${PROJECT_NAME}
+    labels:
+      app: ${APPLICATION_NAME}
+  data:
+    nrdot-config.yaml: |
+      global:
+        deployment_environment: ${ENVIRONMENT}
+        log_level: ${LOG_LEVEL}
+      telemetry:
+        collection_interval: 30s
+        batch_size: ${BATCH_SIZE}
+      security:
+        tls:
+          enabled: true
+        authentication:
+          enabled: true
+        data_redaction:
+          enabled: ${ENABLE_REDACTION}
+      cardinality:
+        enabled: true
+        limits:
+          - metric_name: "*"
+            max_cardinality: ${MAX_CARDINALITY}
+            action: drop_new
+      exporters:
+        newrelic:
+          enabled: true
+          endpoint: ${NEW_RELIC_ENDPOINT}
+
+# Secret
+- apiVersion: v1
+  kind: Secret
+  metadata:
+    name: ${APPLICATION_NAME}-secrets
+    namespace: ${PROJECT_NAME}
+    labels:
+      app: ${APPLICATION_NAME}
+  type: Opaque
+  stringData:
+    NEW_RELIC_LICENSE_KEY: ${NEW_RELIC_LICENSE_KEY}
+    API_AUTH_TOKEN: ${API_AUTH_TOKEN}
+
+# Deployments
+- apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: ${APPLICATION_NAME}-collector
+    namespace: ${PROJECT_NAME}
+    labels:
+      app: ${APPLICATION_NAME}
+      component: collector
+  spec:
+    replicas: ${{COLLECTOR_REPLICAS}}
+    selector:
+      matchLabels:
+        app: ${APPLICATION_NAME}
+        component: collector
+    template:
+      metadata:
+        labels:
+          app: ${APPLICATION_NAME}
+          component: collector
+      spec:
+        serviceAccountName: ${APPLICATION_NAME}-collector
+        containers:
+        - name: collector
+          image: ${COLLECTOR_IMAGE}
+          imagePullPolicy: ${IMAGE_PULL_POLICY}
+          ports:
+          - name: otlp-grpc
+            containerPort: 4317
+            protocol: TCP
+          - name: otlp-http
+            containerPort: 4318
+            protocol: TCP
+          - name: metrics
+            containerPort: 8888
+            protocol: TCP
+          env:
+          - name: NEW_RELIC_LICENSE_KEY
+            valueFrom:
+              secretKeyRef:
+                name: ${APPLICATION_NAME}-secrets
+                key: NEW_RELIC_LICENSE_KEY
+          - name: NEW_RELIC_OTLP_ENDPOINT
+            value: ${NEW_RELIC_ENDPOINT}
+          resources:
+            requests:
+              cpu: ${COLLECTOR_CPU_REQUEST}
+              memory: ${COLLECTOR_MEMORY_REQUEST}
+            limits:
+              cpu: ${COLLECTOR_CPU_LIMIT}
+              memory: ${COLLECTOR_MEMORY_LIMIT}
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 13133
+            initialDelaySeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 13133
+            initialDelaySeconds: 10
+          volumeMounts:
+          - name: config
+            mountPath: /etc/otel
+            readOnly: true
+        volumes:
+        - name: config
+          configMap:
+            name: ${APPLICATION_NAME}-config
+
+- apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: ${APPLICATION_NAME}-api-server
+    namespace: ${PROJECT_NAME}
+    labels:
+      app: ${APPLICATION_NAME}
+      component: api-server
+  spec:
+    replicas: ${{API_SERVER_REPLICAS}}
+    selector:
+      matchLabels:
+        app: ${APPLICATION_NAME}
+        component: api-server
+    template:
+      metadata:
+        labels:
+          app: ${APPLICATION_NAME}
+          component: api-server
+      spec:
+        containers:
+        - name: api-server
+          image: ${API_SERVER_IMAGE}
+          imagePullPolicy: ${IMAGE_PULL_POLICY}
+          ports:
+          - name: http
+            containerPort: 8080
+            protocol: TCP
+          env:
+          - name: NRDOT_API_AUTH_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: ${APPLICATION_NAME}-secrets
+                key: API_AUTH_TOKEN
+          resources:
+            requests:
+              cpu: ${API_SERVER_CPU_REQUEST}
+              memory: ${API_SERVER_MEMORY_REQUEST}
+            limits:
+              cpu: ${API_SERVER_CPU_LIMIT}
+              memory: ${API_SERVER_MEMORY_LIMIT}
+
+# Services
+- apiVersion: v1
+  kind: Service
+  metadata:
+    name: ${APPLICATION_NAME}-collector
+    namespace: ${PROJECT_NAME}
+    labels:
+      app: ${APPLICATION_NAME}
+      component: collector
+  spec:
+    type: ClusterIP
+    selector:
+      app: ${APPLICATION_NAME}
+      component: collector
+    ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: otlp-grpc
+    - name: otlp-http
+      port: 4318
+      targetPort: otlp-http
+    - name: metrics
+      port: 8888
+      targetPort: metrics
+
+- apiVersion: v1
+  kind: Service
+  metadata:
+    name: ${APPLICATION_NAME}-api
+    namespace: ${PROJECT_NAME}
+    labels:
+      app: ${APPLICATION_NAME}
+      component: api-server
+  spec:
+    type: ClusterIP
+    selector:
+      app: ${APPLICATION_NAME}
+      component: api-server
+    ports:
+    - name: http
+      port: 8080
+      targetPort: http
+
+# Routes
+- apiVersion: route.openshift.io/v1
+  kind: Route
+  metadata:
+    name: ${APPLICATION_NAME}-api
+    namespace: ${PROJECT_NAME}
+    labels:
+      app: ${APPLICATION_NAME}
+      component: api-server
+  spec:
+    host: ${API_ROUTE_HOST}
+    to:
+      kind: Service
+      name: ${APPLICATION_NAME}-api
+    port:
+      targetPort: http
+    tls:
+      termination: edge
+      insecureEdgeTerminationPolicy: Redirect
+
+- apiVersion: route.openshift.io/v1
+  kind: Route
+  metadata:
+    name: ${APPLICATION_NAME}-collector
+    namespace: ${PROJECT_NAME}
+    labels:
+      app: ${APPLICATION_NAME}
+      component: collector
+  spec:
+    host: ${COLLECTOR_ROUTE_HOST}
+    to:
+      kind: Service
+      name: ${APPLICATION_NAME}-collector
+    port:
+      targetPort: otlp-http
+    tls:
+      termination: passthrough
+
+# HPA
+- apiVersion: autoscaling/v2
+  kind: HorizontalPodAutoscaler
+  metadata:
+    name: ${APPLICATION_NAME}-collector
+    namespace: ${PROJECT_NAME}
+    labels:
+      app: ${APPLICATION_NAME}
+      component: collector
+  spec:
+    scaleTargetRef:
+      apiVersion: apps/v1
+      kind: Deployment
+      name: ${APPLICATION_NAME}-collector
+    minReplicas: ${{COLLECTOR_MIN_REPLICAS}}
+    maxReplicas: ${{COLLECTOR_MAX_REPLICAS}}
+    metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: ${{COLLECTOR_CPU_TARGET}}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: ${{COLLECTOR_MEMORY_TARGET}}
+
+# NetworkPolicy
+- apiVersion: networking.k8s.io/v1
+  kind: NetworkPolicy
+  metadata:
+    name: ${APPLICATION_NAME}-collector
+    namespace: ${PROJECT_NAME}
+    labels:
+      app: ${APPLICATION_NAME}
+  spec:
+    podSelector:
+      matchLabels:
+        app: ${APPLICATION_NAME}
+        component: collector
+    policyTypes:
+    - Ingress
+    - Egress
+    ingress:
+    - from:
+      - namespaceSelector: {}
+      ports:
+      - protocol: TCP
+        port: 4317
+      - protocol: TCP
+        port: 4318
+    egress:
+    - to:
+      - namespaceSelector:
+          matchLabels:
+            name: openshift-dns
+      ports:
+      - protocol: UDP
+        port: 53
+    - to:
+      - ipBlock:
+          cidr: 0.0.0.0/0
+          except:
+          - 10.0.0.0/8
+          - 172.16.0.0/12
+          - 192.168.0.0/16
+      ports:
+      - protocol: TCP
+        port: 443
+
+# Parameters
+parameters:
+- name: APPLICATION_NAME
+  displayName: Application Name
+  description: The name of the application
+  value: nrdot
+  required: true
+
+- name: PROJECT_NAME
+  displayName: Project Name
+  description: The OpenShift project name
+  value: nrdot-system
+  required: true
+
+- name: ENVIRONMENT
+  displayName: Environment
+  description: Deployment environment (dev, staging, prod)
+  value: production
+  required: true
+
+- name: NEW_RELIC_LICENSE_KEY
+  displayName: New Relic License Key
+  description: Your New Relic license key
+  required: true
+
+- name: NEW_RELIC_ENDPOINT
+  displayName: New Relic OTLP Endpoint
+  description: New Relic OTLP endpoint URL
+  value: otlp.nr-data.net:4317
+  required: true
+
+- name: API_AUTH_TOKEN
+  displayName: API Authentication Token
+  description: Authentication token for API access
+  generate: expression
+  from: "[a-zA-Z0-9]{32}"
+
+- name: COLLECTOR_IMAGE
+  displayName: Collector Image
+  description: Docker image for the collector
+  value: docker.io/newrelic/nrdot-collector:latest
+  required: true
+
+- name: API_SERVER_IMAGE
+  displayName: API Server Image
+  description: Docker image for the API server
+  value: docker.io/newrelic/nrdot-api-server:latest
+  required: true
+
+- name: IMAGE_PULL_POLICY
+  displayName: Image Pull Policy
+  description: Image pull policy
+  value: IfNotPresent
+
+- name: API_ROUTE_HOST
+  displayName: API Route Host
+  description: Hostname for the API route
+  required: true
+
+- name: COLLECTOR_ROUTE_HOST
+  displayName: Collector Route Host
+  description: Hostname for the collector route
+  required: true
+
+- name: COLLECTOR_REPLICAS
+  displayName: Collector Replicas
+  description: Number of collector replicas
+  value: "3"
+
+- name: API_SERVER_REPLICAS
+  displayName: API Server Replicas
+  description: Number of API server replicas
+  value: "2"
+
+- name: COLLECTOR_MIN_REPLICAS
+  displayName: Collector Min Replicas
+  description: Minimum number of collector replicas for HPA
+  value: "3"
+
+- name: COLLECTOR_MAX_REPLICAS
+  displayName: Collector Max Replicas
+  description: Maximum number of collector replicas for HPA
+  value: "10"
+
+- name: COLLECTOR_CPU_REQUEST
+  displayName: Collector CPU Request
+  description: CPU request for collector pods
+  value: "1000m"
+
+- name: COLLECTOR_CPU_LIMIT
+  displayName: Collector CPU Limit
+  description: CPU limit for collector pods
+  value: "4000m"
+
+- name: COLLECTOR_MEMORY_REQUEST
+  displayName: Collector Memory Request
+  description: Memory request for collector pods
+  value: "2Gi"
+
+- name: COLLECTOR_MEMORY_LIMIT
+  displayName: Collector Memory Limit
+  description: Memory limit for collector pods
+  value: "4Gi"
+
+- name: COLLECTOR_CPU_TARGET
+  displayName: Collector CPU Target
+  description: Target CPU utilization for HPA
+  value: "70"
+
+- name: COLLECTOR_MEMORY_TARGET
+  displayName: Collector Memory Target
+  description: Target memory utilization for HPA
+  value: "80"
+
+- name: API_SERVER_CPU_REQUEST
+  displayName: API Server CPU Request
+  description: CPU request for API server pods
+  value: "250m"
+
+- name: API_SERVER_CPU_LIMIT
+  displayName: API Server CPU Limit
+  description: CPU limit for API server pods
+  value: "1000m"
+
+- name: API_SERVER_MEMORY_REQUEST
+  displayName: API Server Memory Request
+  description: Memory request for API server pods
+  value: "256Mi"
+
+- name: API_SERVER_MEMORY_LIMIT
+  displayName: API Server Memory Limit
+  description: Memory limit for API server pods
+  value: "1Gi"
+
+- name: LOG_LEVEL
+  displayName: Log Level
+  description: Logging level (debug, info, warn, error)
+  value: info
+
+- name: BATCH_SIZE
+  displayName: Batch Size
+  description: Telemetry batch size
+  value: "1000"
+
+- name: MAX_CARDINALITY
+  displayName: Max Cardinality
+  description: Maximum metric cardinality
+  value: "100000"
+
+- name: ENABLE_REDACTION
+  displayName: Enable Data Redaction
+  description: Enable sensitive data redaction
+  value: "true"

@@ -1,0 +1,97 @@
+# Patches for development deployments
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nrdot-collector
+spec:
+  template:
+    spec:
+      containers:
+      - name: collector
+        resources:
+          requests:
+            cpu: 200m
+            memory: 512Mi
+          limits:
+            cpu: 1000m
+            memory: 2Gi
+        env:
+        - name: NRDOT_DEV_MODE
+          value: "true"
+        - name: OTEL_LOG_LEVEL
+          value: "debug"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nrdot-api-server
+spec:
+  template:
+    spec:
+      containers:
+      - name: api-server
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        env:
+        - name: NRDOT_API_AUTH_ENABLED
+          value: "false"
+        - name: NRDOT_API_TLS_ENABLED
+          value: "false"
+        - name: NRDOT_API_CORS_ENABLED
+          value: "true"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nrdot-supervisor
+spec:
+  template:
+    spec:
+      containers:
+      - name: supervisor
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nrdot-config-engine
+spec:
+  template:
+    spec:
+      containers:
+      - name: config-engine
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nrdot-privileged-helper
+spec:
+  template:
+    spec:
+      containers:
+      - name: privileged-helper
+        resources:
+          requests:
+            cpu: 25m
+            memory: 32Mi
+          limits:
+            cpu: 100m
+            memory: 128Mi

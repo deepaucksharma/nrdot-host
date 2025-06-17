@@ -1,0 +1,66 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: nrdot-system
+
+commonLabels:
+  app.kubernetes.io/name: nrdot
+  app.kubernetes.io/part-of: nrdot-host
+  app.kubernetes.io/managed-by: kustomize
+
+resources:
+  - ../../manifests/namespace.yaml
+  - ../../manifests/serviceaccount.yaml
+  - ../../manifests/rbac.yaml
+  - ../../manifests/configmap.yaml
+  - ../../manifests/secrets.yaml
+  - ../../manifests/deployment-config-engine.yaml
+  - ../../manifests/deployment-supervisor.yaml
+  - ../../manifests/deployment-collector.yaml
+  - ../../manifests/deployment-api-server.yaml
+  - ../../manifests/daemonset-privileged-helper.yaml
+  - ../../manifests/service-api.yaml
+  - ../../manifests/service-collector.yaml
+  - ../../manifests/networkpolicy.yaml
+  - ../../manifests/poddisruptionbudget.yaml
+  - ../../manifests/horizontalpodautoscaler.yaml
+
+configMapGenerator:
+  - name: nrdot-config
+    behavior: replace
+    files:
+      - nrdot-config.yaml
+      - otelcol-config.yaml
+      - supervisor.yaml
+
+secretGenerator:
+  - name: nrdot-secrets
+    type: Opaque
+    literals:
+      - NEW_RELIC_LICENSE_KEY=YOUR_LICENSE_KEY_HERE
+      - API_AUTH_TOKEN=YOUR_API_TOKEN_HERE
+  - name: nrdot-tls
+    type: kubernetes.io/tls
+    files:
+      - tls.crt
+      - tls.key
+
+images:
+  - name: docker.io/newrelic/nrdot-config-engine
+    newTag: latest
+  - name: docker.io/newrelic/nrdot-supervisor
+    newTag: latest
+  - name: docker.io/newrelic/nrdot-collector
+    newTag: latest
+  - name: docker.io/newrelic/nrdot-api-server
+    newTag: latest
+  - name: docker.io/newrelic/nrdot-privileged-helper
+    newTag: latest
+
+replicas:
+  - name: nrdot-collector
+    count: 3
+  - name: nrdot-api-server
+    count: 2
+  - name: nrdot-supervisor
+    count: 2

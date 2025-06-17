@@ -1,0 +1,168 @@
+# Development environment values for NRDOT Helm chart
+# This configuration is optimized for development and testing
+
+global:
+  logLevel: debug
+  nodeSelector:
+    environment: development
+
+# Use a test license key or secret
+newrelic:
+  licenseKey: "dev-test-license-key"
+  otlpEndpoint: "localhost:4317"  # Use local endpoint for testing
+
+# Namespace configuration
+namespace:
+  name: nrdot-dev
+
+# Reduced resource requirements for development
+configEngine:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+supervisor:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+collector:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+  service:
+    type: ClusterIP
+  autoscaling:
+    enabled: false
+  config:
+    processors:
+      batch:
+        sendBatchSize: 100
+        timeout: 5s
+      memoryLimiter:
+        checkInterval: 1s
+        limitPercentage: 75
+        spikeLimitPercentage: 20
+
+apiServer:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  service:
+    type: ClusterIP
+  config:
+    authEnabled: false
+    tlsEnabled: false
+    corsEnabled: true
+  autoscaling:
+    enabled: false
+
+privilegedHelper:
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+# Disable production features
+networkPolicy:
+  enabled: false
+
+tls:
+  enabled: false
+
+monitoring:
+  serviceMonitor:
+    enabled: false
+
+# Development configuration
+configuration:
+  nrdotConfig: |
+    global:
+      deployment_environment: development
+      log_level: debug
+      metrics_enabled: true
+      tracing_enabled: true
+      
+    telemetry:
+      collection_interval: 10s
+      batch_size: 100
+      queue_size: 1000
+      
+    security:
+      tls:
+        enabled: false
+      authentication:
+        enabled: false
+      data_redaction:
+        enabled: false
+        
+    cardinality:
+      enabled: false
+      
+    enrichment:
+      metadata:
+        - source: kubernetes
+          target_attributes:
+            - k8s.namespace.name
+            - k8s.pod.name
+            
+    transformations:
+      metrics:
+        - type: aggregate
+          match: "test_*"
+          group_by: ["k8s.pod.name"]
+          interval: 30s
+          
+    exporters:
+      newrelic:
+        enabled: false  # Disabled for local testing
+      prometheus:
+        enabled: true
+        endpoint: "0.0.0.0:8888"
+
+# Enable test mode
+tests:
+  enabled: true
+
+# Additional development tools
+extraEnvVars:
+  - name: NRDOT_DEV_MODE
+    value: "true"
+  - name: NRDOT_TRACE_ENABLED
+    value: "true"
+  - name: NRDOT_PROFILE_ENABLED
+    value: "true"
+
+# Faster pod management for development
+minReadySeconds: 0
+revisionHistoryLimit: 3
+
+# Disable security policies for easier development
+podSecurityPolicy:
+  enabled: false
+
+podSecurityStandards:
+  enabled: false

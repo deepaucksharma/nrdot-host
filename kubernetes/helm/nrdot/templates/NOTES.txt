@@ -1,0 +1,95 @@
+NRDOT has been installed!
+
+{{- if .Values.collector.enabled }}
+
+1. Get the OTLP endpoints:
+
+   {{- if contains "LoadBalancer" .Values.collector.service.type }}
+   NOTE: It may take a few minutes for the LoadBalancer IP to be available.
+   You can watch the status by running:
+   
+   kubectl --namespace {{ include "nrdot.namespace" . }} get svc -w {{ include "nrdot.fullname" . }}-collector
+
+   Once the EXTERNAL-IP is available, you can use:
+   
+   export COLLECTOR_IP=$(kubectl --namespace {{ include "nrdot.namespace" . }} get svc {{ include "nrdot.fullname" . }}-collector -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+   echo "OTLP gRPC endpoint: $COLLECTOR_IP:4317"
+   echo "OTLP HTTP endpoint: $COLLECTOR_IP:4318"
+   {{- else if contains "ClusterIP" .Values.collector.service.type }}
+   You can access the collector within the cluster at:
+   
+   OTLP gRPC: {{ include "nrdot.fullname" . }}-collector.{{ include "nrdot.namespace" . }}.svc.cluster.local:4317
+   OTLP HTTP: {{ include "nrdot.fullname" . }}-collector.{{ include "nrdot.namespace" . }}.svc.cluster.local:4318
+   
+   To access from outside the cluster, use port-forward:
+   
+   kubectl --namespace {{ include "nrdot.namespace" . }} port-forward svc/{{ include "nrdot.fullname" . }}-collector 4317:4317 4318:4318
+   {{- end }}
+{{- end }}
+
+{{- if .Values.apiServer.enabled }}
+
+2. Get the API Server URL:
+
+   {{- if .Values.apiServer.ingress.enabled }}
+   {{- range .Values.apiServer.ingress.hosts }}
+   https://{{ .host }}
+   {{- end }}
+   {{- else if contains "LoadBalancer" .Values.apiServer.service.type }}
+   NOTE: It may take a few minutes for the LoadBalancer IP to be available.
+   
+   export API_IP=$(kubectl --namespace {{ include "nrdot.namespace" . }} get svc {{ include "nrdot.fullname" . }}-api -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+   echo "API Server: https://$API_IP"
+   {{- else }}
+   To access the API server, use port-forward:
+   
+   kubectl --namespace {{ include "nrdot.namespace" . }} port-forward svc/{{ include "nrdot.fullname" . }}-api 8443:443
+   
+   Then access at: https://localhost:8443
+   {{- end }}
+{{- end }}
+
+3. Check the status of all components:
+
+   kubectl --namespace {{ include "nrdot.namespace" . }} get pods -l app.kubernetes.io/instance={{ .Release.Name }}
+
+4. View logs:
+
+   # Collector logs
+   kubectl --namespace {{ include "nrdot.namespace" . }} logs -l app.kubernetes.io/component=collector -f
+
+   # API Server logs
+   kubectl --namespace {{ include "nrdot.namespace" . }} logs -l app.kubernetes.io/component=api-server -f
+
+   # Supervisor logs
+   kubectl --namespace {{ include "nrdot.namespace" . }} logs -l app.kubernetes.io/component=supervisor -f
+
+{{- if not .Values.newrelic.licenseKey }}
+{{- if not .Values.newrelic.licenseKeySecretName }}
+
+WARNING: No New Relic license key configured!
+Please set either:
+- newrelic.licenseKey
+- newrelic.licenseKeySecretName
+
+Example:
+helm upgrade {{ .Release.Name }} {{ .Chart.Name }} --set newrelic.licenseKey=YOUR_LICENSE_KEY
+{{- end }}
+{{- end }}
+
+{{- if .Values.monitoring.serviceMonitor.enabled }}
+
+5. Prometheus metrics are available at:
+
+   {{- if .Values.collector.enabled }}
+   - Collector: http://{{ include "nrdot.fullname" . }}-collector-internal:8888/metrics
+   {{- end }}
+   {{- if .Values.apiServer.enabled }}
+   - API Server: http://{{ include "nrdot.fullname" . }}-api-internal:8082/metrics
+   {{- end }}
+   {{- if .Values.supervisor.enabled }}
+   - Supervisor: http://{{ include "nrdot.fullname" . }}-supervisor:8082/metrics
+   {{- end }}
+{{- end }}
+
+For more information, visit: https://github.com/newrelic/nrdot

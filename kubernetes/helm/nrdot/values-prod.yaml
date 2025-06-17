@@ -1,0 +1,349 @@
+# Production environment values for NRDOT Helm chart
+# This configuration is optimized for production workloads
+
+global:
+  logLevel: info
+  nodeSelector:
+    workload-type: monitoring
+  tolerations:
+    - key: dedicated
+      operator: Equal
+      value: monitoring
+      effect: NoSchedule
+
+# Production New Relic configuration
+newrelic:
+  # Use secret for license key
+  licenseKeySecretName: nrdot-license-key
+  licenseKeySecretKey: license-key
+  otlpEndpoint: "otlp.nr-data.net:4317"
+
+# Production namespace
+namespace:
+  name: nrdot-production
+  labels:
+    environment: production
+    criticality: high
+
+# Service account with production annotations
+serviceAccount:
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/nrdot-production
+
+# Production resource allocations
+configEngine:
+  replicaCount: 2
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  priorityClassName: high-priority
+  podDisruptionBudget:
+    minAvailable: 1
+
+supervisor:
+  replicaCount: 3
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+      - labelSelector:
+          matchExpressions:
+          - key: app.kubernetes.io/component
+            operator: In
+            values:
+            - supervisor
+        topologyKey: kubernetes.io/hostname
+  priorityClassName: high-priority
+  podDisruptionBudget:
+    minAvailable: 2
+
+collector:
+  replicaCount: 5
+  resources:
+    requests:
+      cpu: 2000m
+      memory: 4Gi
+    limits:
+      cpu: 4000m
+      memory: 8Gi
+  service:
+    type: LoadBalancer
+    annotations:
+      service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+      service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+      service.beta.kubernetes.io/aws-load-balancer-backend-protocol: "tcp"
+  ingress:
+    enabled: true
+    className: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+      nginx.ingress.kubernetes.io/backend-protocol: "GRPC"
+      nginx.ingress.kubernetes.io/grpc-backend: "true"
+      nginx.ingress.kubernetes.io/limit-rps: "1000"
+    hosts:
+      - host: collector.nrdot.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: collector-tls
+        hosts:
+          - collector.nrdot.example.com
+  autoscaling:
+    enabled: true
+    minReplicas: 5
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+  config:
+    processors:
+      batch:
+        sendBatchSize: 2000
+        timeout: 30s
+      memoryLimiter:
+        checkInterval: 5s
+        limitPercentage: 85
+        spikeLimitPercentage: 30
+  priorityClassName: critical
+  podDisruptionBudget:
+    minAvailable: 3
+  topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: topology.kubernetes.io/zone
+    whenUnsatisfiable: DoNotSchedule
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/component: collector
+
+apiServer:
+  replicaCount: 3
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+  service:
+    type: LoadBalancer
+    annotations:
+      service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+      service.beta.kubernetes.io/aws-load-balancer-ssl-cert: arn:aws:acm:region:account-id:certificate/cert-id
+      service.beta.kubernetes.io/aws-load-balancer-backend-protocol: "ssl"
+      service.beta.kubernetes.io/aws-load-balancer-ssl-ports: "https"
+  ingress:
+    enabled: true
+    className: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+      nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+      nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+      nginx.ingress.kubernetes.io/limit-rps: "100"
+      nginx.ingress.kubernetes.io/limit-connections: "20"
+    hosts:
+      - host: api.nrdot.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: api-tls
+        hosts:
+          - api.nrdot.example.com
+  config:
+    authEnabled: true
+    authTokenSecretName: nrdot-api-token
+    tlsEnabled: true
+    corsEnabled: false
+    readTimeout: "30s"
+    writeTimeout: "30s"
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 60
+    targetMemoryUtilizationPercentage: 75
+  priorityClassName: high-priority
+  podDisruptionBudget:
+    minAvailable: 2
+
+privilegedHelper:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  config:
+    rateLimit: "50/minute"
+    auditLog: "/var/log/nrdot/privileged-audit.log"
+  priorityClassName: critical
+  podDisruptionBudget:
+    maxUnavailable: "20%"
+
+# Enable all security features
+networkPolicy:
+  enabled: true
+  allowedNamespaces: []  # Restrict to same namespace
+
+tls:
+  enabled: true
+  certManager:
+    enabled: true
+    issuerRef:
+      name: letsencrypt-prod
+      kind: ClusterIssuer
+
+# Production monitoring
+monitoring:
+  serviceMonitor:
+    enabled: true
+    namespace: prometheus
+    interval: 30s
+    scrapeTimeout: 10s
+    labels:
+      prometheus: kube-prometheus
+  grafana:
+    enabled: true
+
+# Production configuration
+configuration:
+  nrdotConfig: |
+    global:
+      deployment_environment: production
+      log_level: info
+      metrics_enabled: true
+      tracing_enabled: true
+      
+    telemetry:
+      collection_interval: 30s
+      batch_size: 2000
+      queue_size: 20000
+      timeout: 30s
+      retry:
+        enabled: true
+        initial_interval: 5s
+        max_interval: 300s
+        max_elapsed_time: 900s
+      
+    security:
+      tls:
+        enabled: true
+        cert_file: /etc/nrdot/tls/tls.crt
+        key_file: /etc/nrdot/tls/tls.key
+        ca_file: /etc/nrdot/tls/ca.crt
+        min_version: "1.2"
+      authentication:
+        enabled: true
+        type: token
+      data_redaction:
+        enabled: true
+        patterns:
+          - name: credit_card
+            pattern: '\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b'
+            replacement: "[REDACTED-CC]"
+          - name: ssn
+            pattern: '\b\d{3}-\d{2}-\d{4}\b'
+            replacement: "[REDACTED-SSN]"
+          - name: email
+            pattern: '\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+            replacement: "[REDACTED-EMAIL]"
+            
+    cardinality:
+      enabled: true
+      limits:
+        - metric_name: "*"
+          max_cardinality: 1000000
+          action: drop_new
+        - metric_name: "http_*"
+          max_cardinality: 500000
+          action: aggregate
+          
+    enrichment:
+      metadata:
+        - source: kubernetes
+          target_attributes:
+            - k8s.namespace.name
+            - k8s.pod.name
+            - k8s.deployment.name
+            - k8s.node.name
+            - k8s.cluster.name
+        - source: environment
+          mappings:
+            CLUSTER_NAME: production-cluster
+            REGION: us-east-1
+            ENVIRONMENT: production
+            
+    transformations:
+      metrics:
+        - type: aggregate
+          match: "container_*"
+          group_by: ["k8s.namespace.name", "k8s.deployment.name"]
+          interval: 60s
+        - type: rate
+          match: "*_total"
+          unit: "per_second"
+          
+    exporters:
+      newrelic:
+        enabled: true
+        endpoint: "otlp.nr-data.net:4317"
+        compression: gzip
+        timeout: 30s
+        retry_on_failure:
+          enabled: true
+          initial_interval: 5s
+          max_interval: 300s
+      prometheus:
+        enabled: true
+        endpoint: "0.0.0.0:8888"
+        namespace: nrdot
+
+# Pod disruption budgets
+podDisruptionBudget:
+  enabled: true
+
+# Enable pod security
+podSecurityPolicy:
+  enabled: false  # Deprecated, using PSS instead
+
+podSecurityStandards:
+  enabled: true
+  enforce: "restricted"
+  audit: "restricted"
+  warn: "restricted"
+
+# Production lifecycle hooks
+lifecycleHooks:
+  preStop:
+    exec:
+      command:
+      - /bin/sh
+      - -c
+      - sleep 15
+
+# Topology spread for AZ distribution
+topologySpreadConstraints:
+- maxSkew: 1
+  topologyKey: topology.kubernetes.io/zone
+  whenUnsatisfiable: DoNotSchedule
+
+# Update strategy for zero downtime
+updateStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+
+minReadySeconds: 30
+revisionHistoryLimit: 10

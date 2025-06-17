@@ -1,0 +1,55 @@
+apiVersion: source.toolkit.fluxcd.io/v1beta2
+kind: GitRepository
+metadata:
+  name: nrdot
+  namespace: flux-system
+spec:
+  interval: 1m
+  ref:
+    branch: main
+  url: https://github.com/newrelic/nrdot
+  # If private repository, reference secret:
+  # secretRef:
+  #   name: nrdot-auth
+---
+apiVersion: source.toolkit.fluxcd.io/v1beta2
+kind: HelmRepository
+metadata:
+  name: nrdot-charts
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: https://newrelic.github.io/nrdot-helm-charts
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: nrdot-auth
+  namespace: flux-system
+type: Opaque
+stringData:
+  username: git
+  password: ${GIT_TOKEN}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: nrdot-values
+  namespace: flux-system
+type: Opaque
+stringData:
+  values.yaml: |
+    newrelic:
+      licenseKeySecretName: nrdot-license
+    collector:
+      replicaCount: 3
+      autoscaling:
+        enabled: true
+    apiServer:
+      ingress:
+        enabled: true
+        hosts:
+          - host: nrdot-api.example.com
+            paths:
+              - path: /
+                pathType: Prefix

@@ -1,0 +1,100 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: nrdot-dev
+
+namePrefix: dev-
+nameSuffix: ""
+
+commonLabels:
+  environment: development
+  
+bases:
+  - ../../base
+
+patchesStrategicMerge:
+  - deployment-patches.yaml
+  - service-patches.yaml
+
+configMapGenerator:
+  - name: nrdot-config
+    behavior: replace
+    literals:
+      - |
+        nrdot-config.yaml=
+        global:
+          deployment_environment: development
+          log_level: debug
+          metrics_enabled: true
+          tracing_enabled: true
+        telemetry:
+          collection_interval: 10s
+          batch_size: 100
+        security:
+          tls:
+            enabled: false
+          authentication:
+            enabled: false
+          data_redaction:
+            enabled: false
+        cardinality:
+          enabled: false
+        exporters:
+          newrelic:
+            enabled: false
+          prometheus:
+            enabled: true
+
+secretGenerator:
+  - name: nrdot-secrets
+    behavior: replace
+    type: Opaque
+    literals:
+      - NEW_RELIC_LICENSE_KEY=dev-test-key
+      - API_AUTH_TOKEN=dev-token
+
+replicas:
+  - name: nrdot-collector
+    count: 1
+  - name: nrdot-api-server
+    count: 1
+  - name: nrdot-supervisor
+    count: 1
+  - name: nrdot-config-engine
+    count: 1
+
+images:
+  - name: docker.io/newrelic/nrdot-config-engine
+    newTag: dev
+  - name: docker.io/newrelic/nrdot-supervisor
+    newTag: dev
+  - name: docker.io/newrelic/nrdot-collector
+    newTag: dev
+  - name: docker.io/newrelic/nrdot-api-server
+    newTag: dev
+  - name: docker.io/newrelic/nrdot-privileged-helper
+    newTag: dev
+
+patches:
+  - target:
+      kind: Service
+      name: nrdot-collector
+    patch: |
+      - op: replace
+        path: /spec/type
+        value: ClusterIP
+  - target:
+      kind: Service
+      name: nrdot-api
+    patch: |
+      - op: replace
+        path: /spec/type
+        value: ClusterIP
+  - target:
+      kind: NetworkPolicy
+    patch: |
+      - op: replace
+        path: /spec
+        value:
+          podSelector: {}
+          policyTypes: []

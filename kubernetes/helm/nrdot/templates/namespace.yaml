@@ -1,0 +1,64 @@
+{{- if .Values.namespace.create -}}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ include "nrdot.namespace" . }}
+  labels:
+    {{- include "nrdot.labels" . | nindent 4 }}
+    {{- with .Values.namespace.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- if .Values.podSecurityStandards.enabled }}
+    pod-security.kubernetes.io/enforce: {{ .Values.podSecurityStandards.enforce }}
+    pod-security.kubernetes.io/audit: {{ .Values.podSecurityStandards.audit }}
+    pod-security.kubernetes.io/warn: {{ .Values.podSecurityStandards.warn }}
+    {{- end }}
+  {{- with .Values.namespace.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: {{ include "nrdot.fullname" . }}-quota
+  namespace: {{ include "nrdot.namespace" . }}
+  labels:
+    {{- include "nrdot.labels" . | nindent 4 }}
+spec:
+  hard:
+    requests.cpu: "20"
+    requests.memory: "40Gi"
+    limits.cpu: "40"
+    limits.memory: "80Gi"
+    persistentvolumeclaims: "10"
+    services.loadbalancers: "2"
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: {{ include "nrdot.fullname" . }}-limit-range
+  namespace: {{ include "nrdot.namespace" . }}
+  labels:
+    {{- include "nrdot.labels" . | nindent 4 }}
+spec:
+  limits:
+  - max:
+      cpu: "4"
+      memory: "8Gi"
+    min:
+      cpu: "50m"
+      memory: "64Mi"
+    default:
+      cpu: "500m"
+      memory: "512Mi"
+    defaultRequest:
+      cpu: "100m"
+      memory: "128Mi"
+    type: Container
+  - max:
+      storage: "10Gi"
+    min:
+      storage: "1Gi"
+    type: PersistentVolumeClaim
+{{- end }}
