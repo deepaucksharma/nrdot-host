@@ -1,7 +1,7 @@
 # NRDOT-HOST Base Image
 # Provides common dependencies and security hardening for all components
 
-FROM alpine:3.19 AS base
+FROM alpine:3.22 AS base
 
 # Install common dependencies
 RUN apk add --no-cache \
