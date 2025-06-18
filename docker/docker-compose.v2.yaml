@@ -1,0 +1,183 @@
+version: '3.8'
+
+# NRDOT v2.0 Unified Architecture Docker Compose
+# Single unified binary replacing microservices
+
+networks:
+  nrdot:
+    driver: bridge
+
+volumes:
+  nrdot-config:
+  nrdot-data:
+  nrdot-logs:
+  prometheus-data:
+  grafana-data:
+
+services:
+  # NRDOT Unified Host (v2.0)
+  nrdot-host:
+    build:
+      context: ..
+      dockerfile: docker/unified/Dockerfile
+      args:
+        VERSION: ${VERSION:-2.0.0}
+    image: nrdot-host:${VERSION:-2.0.0}
+    container_name: nrdot-host
+    hostname: nrdot-host
+    networks:
+      - nrdot
+    ports:
+      # API Server (embedded)
+      - "8080:8080"
+      # OpenTelemetry receivers
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      # Collector internals
+      - "8888:8888"   # Prometheus metrics
+      - "13133:13133" # Health check
+      - "55679:55679" # zPages
+    volumes:
+      - nrdot-config:/etc/nrdot
+      - nrdot-data:/var/lib/nrdot
+      - nrdot-logs:/var/log/nrdot
+      - ./configs/nrdot-unified.yaml:/etc/nrdot/config.yaml:ro
+      # For host monitoring
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host/root:ro
+    environment:
+      # Unified binary mode
+      - NRDOT_MODE=all
+      # Configuration
+      - NRDOT_CONFIG=/etc/nrdot/config.yaml
+      - NRDOT_LOG_LEVEL=${LOG_LEVEL:-info}
+      # API Server settings
+      - NRDOT_API_ADDRESS=0.0.0.0:8080
+      - NRDOT_API_CORS_ENABLED=true
+      # Reload strategy
+      - NRDOT_RELOAD_STRATEGY=blue-green
+      # Resource limits
+      - GOMEMLIMIT=300MiB
+      # New Relic export (optional)
+      - NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY}
+      - NEW_RELIC_OTLP_ENDPOINT=${NEW_RELIC_OTLP_ENDPOINT:-https://otlp.nr-data.net}
+      # Host monitoring paths
+      - HOST_PROC=/host/proc
+      - HOST_SYS=/host/sys
+      - HOST_ETC=/host/etc
+      - HOST_VAR=/host/var
+    cap_add:
+      # For privileged monitoring
+      - SYS_PTRACE
+      - DAC_READ_SEARCH
+    security_opt:
+      - apparmor:unconfined
+    pid: host
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/nrdot-host", "--mode=collector", "--config=/etc/nrdot/health-check.yaml", "--dry-run"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    labels:
+      - "com.newrelic.nrdot.version=2.0.0"
+      - "com.newrelic.nrdot.mode=unified"
+
+  # Minimal API-only instance (example of standalone mode)
+  nrdot-api:
+    image: nrdot-host:${VERSION:-2.0.0}
+    container_name: nrdot-api
+    hostname: nrdot-api
+    networks:
+      - nrdot
+    ports:
+      - "8081:8080"
+    volumes:
+      - nrdot-config:/etc/nrdot:ro
+      - nrdot-data:/var/lib/nrdot:ro
+    environment:
+      - NRDOT_MODE=api
+      - NRDOT_API_ADDRESS=0.0.0.0:8080
+      - NRDOT_LOG_LEVEL=${LOG_LEVEL:-info}
+    depends_on:
+      - nrdot-host
+    profiles:
+      - api-only
+    restart: unless-stopped
+
+  # Minimal collector-only instance (example of standalone mode)
+  nrdot-collector:
+    image: nrdot-host:${VERSION:-2.0.0}
+    container_name: nrdot-collector
+    hostname: nrdot-collector
+    networks:
+      - nrdot
+    ports:
+      - "14317:4317"   # OTLP gRPC
+      - "14318:4318"   # OTLP HTTP
+    volumes:
+      - ./configs/collector-only.yaml:/etc/nrdot/config.yaml:ro
+    environment:
+      - NRDOT_MODE=collector
+      - NRDOT_CONFIG=/etc/nrdot/config.yaml
+      - NRDOT_LOG_LEVEL=${LOG_LEVEL:-info}
+    profiles:
+      - collector-only
+    restart: unless-stopped
+
+  # Supporting Services (unchanged)
+  
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: nrdot-prometheus
+    networks:
+      - nrdot
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./configs/prometheus-v2.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: nrdot-grafana
+    networks:
+      - nrdot
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./configs/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./configs/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+  # Example application to monitor
+  demo-app:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: demo-app
+    networks:
+      - nrdot
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./configs/demo-app-collector.yaml:/etc/otel-collector-config.yaml:ro
+    environment:
+      - METRICS_HOST=nrdot-host
+      - METRICS_PORT=4317
+    depends_on:
+      - nrdot-host
+    profiles:
+      - demo
+    restart: unless-stopped

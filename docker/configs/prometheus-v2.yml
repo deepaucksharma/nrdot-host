@@ -1,0 +1,40 @@
+# Prometheus configuration for NRDOT v2.0
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Scrape NRDOT unified host metrics
+  - job_name: 'nrdot-host'
+    static_configs:
+      - targets: ['nrdot-host:8888']
+        labels:
+          instance: 'nrdot-unified'
+          version: 'v2.0'
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'otelcol_.*'
+        action: keep
+
+  # Scrape NRDOT API metrics (when available)
+  - job_name: 'nrdot-api'
+    static_configs:
+      - targets: ['nrdot-host:8080']
+        labels:
+          component: 'api-server'
+    metrics_path: '/metrics'
+
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Example: scrape demo applications
+  - job_name: 'demo-apps'
+    static_configs:
+      - targets: []
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+      - target_label: environment
+        replacement: 'dev'

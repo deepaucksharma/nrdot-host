@@ -93,6 +93,21 @@ docker-push:
 	@echo "Pushing Docker images..."
 	@cd docker && make push-all TAG=$(VERSION)
 
+## Build unified Docker image (v2.0)
+docker-unified:
+	@echo "Building unified NRDOT-HOST Docker image..."
+	@docker build \
+		--build-arg VERSION=$(VERSION) \
+		--build-arg BUILD_TIME="$(shell date -u +%Y-%m-%dT%H:%M:%SZ)" \
+		--build-arg GIT_COMMIT=$(COMMIT) \
+		-t nrdot-host:$(VERSION) \
+		-t nrdot-host:latest \
+		-f docker/unified/Dockerfile .
+	@echo "Unified image built: nrdot-host:$(VERSION)"
+
+## Build all Docker images including unified
+docker-all: docker-build docker-unified
+
 ## Install components locally
 install: build
 	@echo "Installing NRDOT-HOST components..."

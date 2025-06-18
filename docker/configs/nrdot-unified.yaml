@@ -1,0 +1,199 @@
+# NRDOT v2.0 Unified Configuration
+# This configuration is used by the unified binary in docker-compose
+
+# Extensions for health checks and debugging
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+  
+  zpages:
+    endpoint: 0.0.0.0:55679
+  
+  memory_ballast:
+    size_mib: 128
+  
+  pprof:
+    endpoint: 0.0.0.0:6060
+
+# Receivers configuration
+receivers:
+  # Host metrics collection
+  hostmetrics:
+    collection_interval: 30s
+    scrapers:
+      cpu:
+      disk:
+      filesystem:
+      load:
+      memory:
+      network:
+      paging:
+      processes:
+      process:
+  
+  # OTLP receivers for external data
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+        cors:
+          allowed_origins:
+            - "http://localhost:*"
+            - "http://grafana:3000"
+  
+  # Prometheus receiver for scraping
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'otel-collector'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['localhost:8888']
+
+# Processors with NRDOT custom processors
+processors:
+  # NRDOT Security Processor - must be first
+  nrsecurity:
+    redaction:
+      enabled: true
+      patterns:
+        - name: "api_keys"
+          pattern: "[a-zA-Z0-9]{32,}"
+          replacement: "[REDACTED-API-KEY]"
+        - name: "credit_cards" 
+          pattern: "\\b\\d{13,16}\\b"
+          replacement: "[REDACTED-CC]"
+    compliance:
+      pci_dss: true
+      hipaa: false
+  
+  # NRDOT Enrichment Processor
+  nrenrich:
+    metadata:
+      - key: "deployment.environment"
+        value: "${DEPLOYMENT_ENV:-development}"
+      - key: "service.version"
+        value: "2.0.0"
+      - key: "host.cloud.provider"
+        value: "${CLOUD_PROVIDER:-local}"
+    system_attributes:
+      enabled: true
+      include:
+        - host.name
+        - host.id
+        - os.type
+        - os.version
+  
+  # NRDOT Transform Processor
+  nrtransform:
+    metric_statements:
+      - context: datapoint
+        statements:
+          - set(attributes["processed.by"], "nrdot-v2")
+          - set(attributes["processed.time"], Now())
+    calculations:
+      - metric: system.cpu.utilization
+        operation: average
+        dimensions: [host.name, cpu.id]
+  
+  # NRDOT Cardinality Cap Processor
+  nrcap:
+    metrics:
+      max_cardinality: 10000
+      dimensions_limit: 20
+    traces:
+      max_spans_per_trace: 1000
+    logs:
+      max_attributes: 50
+  
+  # Standard processors
+  batch:
+    timeout: 5s
+    send_batch_size: 1024
+    send_batch_max_size: 2048
+  
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 256
+    spike_limit_mib: 64
+  
+  resource:
+    attributes:
+      - key: nrdot.version
+        value: "2.0.0"
+        action: upsert
+      - key: telemetry.sdk.name
+        value: "nrdot"
+        action: upsert
+
+# Exporters configuration
+exporters:
+  # Development logging exporter
+  logging:
+    loglevel: info
+    sampling_initial: 10
+    sampling_thereafter: 100
+  
+  # Prometheus exporter for local metrics
+  prometheus:
+    endpoint: 0.0.0.0:8888
+    namespace: nrdot
+    send_timestamps: true
+    metric_expiration: 5m
+  
+  # OTLP exporter to New Relic (optional)
+  otlp/newrelic:
+    endpoint: ${NEW_RELIC_OTLP_ENDPOINT:-otlp.nr-data.net:4317}
+    headers:
+      api-key: ${NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+  
+  # File exporter for debugging
+  file/debug:
+    path: /var/log/nrdot/debug.json
+    rotation:
+      max_megabytes: 10
+      max_days: 3
+      max_backups: 3
+
+# Service pipelines configuration
+service:
+  # Extensions to enable
+  extensions: [health_check, zpages, memory_ballast, pprof]
+  
+  # Telemetry configuration
+  telemetry:
+    logs:
+      level: ${NRDOT_LOG_LEVEL:-info}
+      output_paths: ["/var/log/nrdot/collector.log"]
+      error_output_paths: ["/var/log/nrdot/collector-error.log"]
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888
+  
+  # Pipeline definitions
+  pipelines:
+    # Metrics pipeline
+    metrics:
+      receivers: [hostmetrics, otlp, prometheus]
+      processors: [nrsecurity, nrenrich, nrtransform, nrcap, memory_limiter, batch, resource]
+      exporters: [prometheus, logging]
+    
+    # Traces pipeline  
+    traces:
+      receivers: [otlp]
+      processors: [nrsecurity, nrenrich, memory_limiter, batch, resource]
+      exporters: [logging]
+    
+    # Logs pipeline
+    logs:
+      receivers: [otlp]
+      processors: [nrsecurity, nrenrich, memory_limiter, batch, resource]
+      exporters: [logging, file/debug]
