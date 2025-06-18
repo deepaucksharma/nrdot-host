@@ -82,6 +82,8 @@ type ResourceMetrics struct {
 	MemoryPercent     float64       `json:"memory_percent"`
 	GoroutineCount    int           `json:"goroutine_count"`
 	OpenFileCount     int           `json:"open_file_count"`
+	OpenFiles         int           `json:"open_files"`         // Alias for OpenFileCount
+	ThreadCount       int           `json:"thread_count"`       // OS thread count
 	NetworkBytesRecv  int64         `json:"network_bytes_recv"`
 	NetworkBytesSent  int64         `json:"network_bytes_sent"`
 }

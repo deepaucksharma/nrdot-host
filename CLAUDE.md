@@ -4,95 +4,143 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-NRDOT-HOST is an enterprise-grade OpenTelemetry distribution for host monitoring. Starting with v2.0, it uses a **unified architecture** where all components run in a single binary, replacing the previous microservices design.
+NRDOT-HOST is evolving from an OpenTelemetry distribution into New Relic's **canonical Linux telemetry collector** with intelligent auto-configuration. The project targets Linux hosts exclusively and will replace the legacy Infrastructure agent over the next 3-6 months.
 
-## Architecture v2.0 (Current)
+## Current Architecture & Future Direction
 
-### Unified Binary Design
-- **Single Process**: All components (supervisor, config engine, API server) run in one process
-- **Direct Communication**: Components use direct function calls, no IPC
-- **Mode Selection**: Can run as `--mode=all` (default), `--mode=agent`, or `--mode=api`
-- **Resource Efficient**: 40% less memory, 60% less CPU than v1.0
+### Current State (v2.0 - Unified)
+- **Single Binary**: All components in one Linux executable
+- **Direct Communication**: Function calls, no IPC overhead
+- **Linux-Optimized**: Uses `/proc`, `/sys`, traditional Unix methods
+- **OpenTelemetry Native**: Built on OTel Collector framework
+
+### Future State (v3.0 - Auto-Configuration)
+- **Service Discovery**: Automatic detection of MySQL, Redis, Nginx, etc.
+- **Remote Configuration**: Dynamic config from New Relic
+- **Zero-Touch Setup**: No manual integration configuration
+- **Migration Tools**: Automated transition from Infrastructure agent
 
 ### Core Components
-1. **nrdot-common**: Shared interfaces and data models
-2. **nrdot-supervisor**: Unified supervisor with embedded API server
-3. **nrdot-config-engine**: Consolidated config validation and generation
-4. **Custom Processors**: nrsecurity, nrenrich, nrtransform, nrcap
+1. **nrdot-common**: Shared interfaces and Linux-specific data models
+2. **nrdot-supervisor**: Process management with blue-green reloads
+3. **nrdot-config-engine**: Template-based config generation
+4. **nrdot-privileged-helper**: Secure elevated operations (setuid)
+5. **Custom Processors**: Security redaction, enrichment, transforms
 
 ## Essential Commands
 
-### Building
+### Building (Linux Only)
 ```bash
-# Build unified binary
-cd cmd/nrdot-host
-make build
+# Build Linux binary
+GOOS=linux GOARCH=amd64 make build
 
-# Build all components (legacy)
-make all
+# Build with privileged helper
+make build-privileged-helper
+chmod u+s bin/nrdot-privileged-helper
 ```
 
 ### Running
 ```bash
-# Run unified binary (all components)
-./bin/nrdot-host --mode=all
+# Standard Linux host monitoring
+sudo ./bin/nrdot-host --mode=all
 
-# Run minimal agent (no API)
-./bin/nrdot-host --mode=agent
+# Future: With auto-configuration
+sudo ./bin/nrdot-host --auto-config=true
 
-# Run with debug logging
-./bin/nrdot-host --mode=all --log-level=debug
+# Test service discovery
+./bin/nrdot-host discover --verbose
 ```
 
 ### Testing
 ```bash
 make test             # Run all unit tests
-make test-integration # Run integration tests
-make lint            # Run linters
+make test-linux       # Linux-specific tests
+make test-auto-config # Auto-configuration tests
 ```
 
 ## Key Design Principles
 
-1. **Simplicity First**: Single binary deployment over complex orchestration
-2. **Direct Integration**: Function calls over IPC
-3. **Zero-Config**: Works with minimal configuration
-4. **Enterprise Ready**: Security, reliability, performance built-in
+1. **Linux-First**: Optimized for Linux hosts, no cross-platform compromises
+2. **Auto-Configuration**: Zero-touch service discovery and setup
+3. **OpenTelemetry Native**: Built on OTel Collector, not a fork
+4. **Security by Default**: Automatic redaction, minimal privileges
+5. **Infrastructure Agent Compatible**: Smooth migration path
 
 ## Component Integration
 
-### Configuration Flow
+### Current Configuration Flow
 ```
 User YAML → ConfigEngine.Validate() → ConfigEngine.Generate() → Supervisor.Apply()
 ```
 
-### Reload Strategy
-The system uses blue-green reload by default:
-1. Start new collector with new config
-2. Verify health
-3. Switch traffic
-4. Stop old collector
+### Future Auto-Configuration Flow
+```
+Service Discovery → Baseline Report → Remote Config Fetch → Template Application → Blue-Green Reload
+```
 
-## Important Files
+### Service Detection Methods
+- Process name patterns (`mysqld`, `nginx`, `redis-server`)
+- Well-known ports (3306, 5432, 6379, 80/443)
+- Config file presence (`/etc/mysql/`, `/etc/nginx/`)
+- Package manager queries (dpkg/rpm)
 
+## Important Files & Directories
+
+### Current Implementation
 - `cmd/nrdot-host/main.go`: Unified binary entry point
-- `nrdot-supervisor/supervisor_v2.go`: Unified supervisor implementation
-- `nrdot-config-engine/engine_v2.go`: Consolidated config engine
-- `nrdot-common/`: Shared types and interfaces
-- `ARCHITECTURE_V2.md`: Detailed architecture documentation
+- `nrdot-supervisor/`: Process management and reloads
+- `nrdot-config-engine/`: Config validation and generation
+- `nrdot-common/`: Shared Linux-specific types
+- `nrdot-privileged-helper/`: Setuid binary for elevated ops
+
+### Future Auto-Config Components
+- `nrdot-discovery/`: Service detection engine (TBD)
+- `nrdot-remote-config/`: Config fetch client (TBD)
+- `nrdot-migrate/`: Infrastructure agent migration (TBD)
+
+### Documentation
+- `ARCHITECTURE_V2.md`: Linux telemetry collector architecture
+- `AUTO_CONFIGURATION.md`: Auto-config system design
+- `INFRASTRUCTURE_MIGRATION.md`: Migration guide
 
 ## Development Best Practices
 
-1. **Use Common Types**: Always use types from `nrdot-common` for inter-component data
-2. **Direct Calls**: Prefer direct function calls over any form of IPC
-3. **Single Telemetry**: Use the unified telemetry client in supervisor
-4. **Mode Awareness**: Code should work in all operating modes
+1. **Linux-Only Code**: No Windows/macOS specific code or build tags
+2. **Process Safety**: Use privileged helper for elevated operations
+3. **Auto-Config First**: Design features to work with auto-configuration
+4. **Direct Integration**: Embed components, avoid separate processes
+5. **OTel Conventions**: Follow OpenTelemetry semantic conventions
 
 ## Testing Strategy
 
-- Unit tests: In each component's `*_test.go` files
-- Integration tests: Test unified binary with all modes
-- Performance tests: Verify memory/CPU improvements
+- **Unit Tests**: Component-level tests with mocks
+- **Linux Integration**: Tests requiring `/proc`, `/sys` access
+- **Service Discovery**: Mock services for detection testing
+- **Auto-Config Flow**: End-to-end configuration scenarios
+- **Migration Tests**: Validate Infrastructure agent compatibility
 
-## Migration Notes
+## Roadmap Context
 
-This is a first release, so no migration is needed. The v2.0 architecture is the recommended approach for all new deployments.
+### Phase 0 (Current): Foundation
+- Unified architecture ✅
+- Basic Linux monitoring ✅
+- Manual configuration ✅
+
+### Phase 1 (1 month): Enhanced Monitoring
+- Process-level metrics
+- Privileged helper integration
+- Service detection framework
+
+### Phase 2 (1.5 months): Auto-Configuration
+- Service discovery engine
+- Remote config client
+- Dynamic pipelines
+
+### Phase 3 (1 month): Production & Migration
+- Infrastructure agent migration tools
+- Enterprise packaging
+- GA release
+
+## No eBPF Note
+
+This project uses traditional Linux methods (`/proc`, `/sys`, netlink) for compatibility and simplicity. eBPF is not required or planned for the initial releases.

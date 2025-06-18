@@ -103,6 +103,10 @@ func (s *Server) setupRoutes() {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintf(w, "NRDOT API Server v%s\n", s.config.Version)
 	}).Methods("GET")
+
+	// Prometheus metrics endpoint at root (for standard Prometheus scraping)
+	rootMetricsHandler := handlers.NewMetricsHandler(s.logger, s.config.Version, s.metricsProvider)
+	s.router.Handle("/metrics", rootMetricsHandler).Methods("GET")
 }
 
 // buildHandler builds the HTTP handler with middleware

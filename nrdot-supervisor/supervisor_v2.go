@@ -39,6 +39,9 @@ type UnifiedSupervisor struct {
 	health        models.HealthStatus
 	startTime     time.Time
 	
+	// Metrics collection
+	metrics       *MetricsCollector
+	
 	// Options
 	config        SupervisorConfig
 }
@@ -97,6 +100,7 @@ func NewUnifiedSupervisor(config SupervisorConfig) (*UnifiedSupervisor, error) {
 		logger:       config.Logger,
 		configEngine: engine,
 		telemetry:    telemetry,
+		metrics:      NewMetricsCollector(),
 		config:       config,
 		startTime:    time.Now(),
 		status: models.CollectorStatus{
@@ -110,6 +114,9 @@ func NewUnifiedSupervisor(config SupervisorConfig) (*UnifiedSupervisor, error) {
 			Timestamp: time.Now(),
 		},
 	}
+	
+	// Set initial metrics state
+	s.metrics.SetAPIEnabled(config.APIEnabled)
 	
 	// Set up reload strategy
 	s.reloadStrategy = &BlueGreenReloadStrategy{supervisor: s}
@@ -188,10 +195,11 @@ func (s *UnifiedSupervisor) Stop(ctx context.Context) error {
 func (s *UnifiedSupervisor) setupAPIServer() {
 	// Create handlers with direct access to supervisor
 	s.apiHandlers = &handlers.Handlers{
-		StatusProvider: s,
-		ConfigProvider: s.configEngine,
-		HealthProvider: s,
-		Logger:         s.logger.Named("api"),
+		StatusProvider:  s,
+		ConfigProvider:  s.configEngine,
+		HealthProvider:  s,
+		MetricsProvider: s.metrics,
+		Logger:          s.logger.Named("api"),
 	}
 	
 	// Set up routes
@@ -200,6 +208,9 @@ func (s *UnifiedSupervisor) setupAPIServer() {
 	// Health endpoints
 	router.HandleFunc("/health", s.apiHandlers.Health).Methods("GET")
 	router.HandleFunc("/ready", s.apiHandlers.Ready).Methods("GET")
+	
+	// Prometheus metrics endpoint at root level
+	router.HandleFunc("/metrics", s.apiHandlers.Metrics).Methods("GET")
 	
 	// API v1 routes
 	v1 := router.PathPrefix("/v1").Subrouter()

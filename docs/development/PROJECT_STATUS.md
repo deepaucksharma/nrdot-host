@@ -94,126 +94,59 @@ NRDOT-HOST has achieved v2.0 unified architecture and is now evolving into New R
 3. **Package**: APT/YUM repositories
 4. **Ansible**: Automated deployment
 
-## 📈 Evolution Timeline
+## 📈 Adoption Roadmap
 
-### Current State (v2.0)
-- ✅ Unified binary architecture
-- ✅ Basic host monitoring
-- ✅ Manual configuration
+### Immediate (Week 1-2)
+- Deploy to staging environments
+- Run security hardening
+- Prepare operations team
 
-### 3 Months (v3.0)
-- 🎯 Auto-configuration enabled
-- 🎯 Service discovery active  
-- 🎯 Enhanced process monitoring
-- 🎯 Beta migration tools
+### Short Term (Week 3-8)
+- Production pilot (10% → 50% → 100%)
+- Monitor and optimize
+- Gather feedback
 
-### 6 Months (v3.5)
-- 🎯 Full Infrastructure agent replacement
-- 🎯 10+ auto-configured services
-- 🎯 Production migration tools
-- 🎯 Enterprise features complete
+### Medium Term (Month 2-3)
+- Version 2.1 enhancements
+- Platform expansion (Windows)
+- API v2 development
 
-## 🔧 Getting Started
+### Long Term (Month 4-6)
+- Version 2.2 features
+- Community building
+- Advanced capabilities
 
-### Current Installation
+## 🔧 Quick Start
+
 ```bash
-# Download Linux binary
-curl -L https://github.com/newrelic/nrdot-host/releases/latest/download/nrdot-host-linux-amd64 -o nrdot-host
+# Download and run
+curl -L https://github.com/newrelic/nrdot-host/releases/download/v2.0.0/nrdot-host-linux-amd64 -o nrdot-host
 chmod +x nrdot-host
-sudo mv nrdot-host /usr/local/bin/
+./nrdot-host --mode=all
 
-# Create minimal config
-sudo mkdir -p /etc/nrdot
-echo "license_key: YOUR_KEY" | sudo tee /etc/nrdot/config.yaml
-
-# Run
-sudo nrdot-host --mode=all
+# Or use Docker
+docker run -d -p 8090:8090 newrelic/nrdot-host:2.0.0
 ```
 
-### Future Installation (Phase 3)
-```bash
-# One-line install with auto-config
-curl -s https://download.newrelic.com/nrdot/install.sh | sudo bash
+## 📋 Critical Next Steps (From ACTION_PLAN_V2.md)
 
-# Automatic migration from Infrastructure agent
-sudo nrdot-host migrate-infra
-```
+### Week 1 - Security & Deployment Critical
+1. **Implement API Authentication** (2 days) - BLOCKING
+2. **Create Unified Docker Image** (1 day) - BLOCKING
+3. **Add Rate Limiting** (1 day)
+4. **Update Docker Compose** (0.5 day)
+5. **Add Main Binary Unit Tests** (1 day)
 
-## 🗺️ 3-6 Month Roadmap to Linux Telemetry Collector
+### Week 2 - Operational Excellence
+1. **Add Prometheus Metrics Endpoint** (2 days)
+2. **Implement Standalone Modes** (3 days)
+3. **Create Operational Runbooks** (2 days)
+4. **Add Pre-commit Hooks** (0.5 day)
 
-### Phase 0: Foundation & Audit (0.5 month) ✅
-- ✅ Unified architecture implementation
-- ✅ Core telemetry collection (metrics, logs, traces)
-- ✅ Linux packaging and systemd integration
-- 🔄 Code audit and Linux-only optimization
-- 🔄 Remove Kubernetes/Windows components
-- 🔄 Update CI/CD for Linux targets only
-
-### Phase 1: Core Host Telemetry (1 month) 
-- 🎯 **Enhanced Process Monitoring**
-  - Per-process CPU/memory tracking
-  - Process relationship mapping
-  - Service detection by process patterns
-- 🎯 **Privileged Helper Integration**
-  - Secure elevated operations
-  - Non-root main process
-  - Process and network visibility
-- 🎯 **Host Inventory Collection**
-  - OS packages and versions
-  - System configuration
-  - Running services baseline
-
-### Phase 2: Auto-Configuration (1.5 months)
-- 🎯 **Service Discovery Engine**
-  - Process name matching
-  - Port scanning (netstat/ss)
-  - Config file detection
-- 🎯 **Baseline Reporting**
-  - Upload discovered services
-  - Host capacity metrics
-  - Environment fingerprint
-- 🎯 **Remote Configuration**
-  - Fetch optimized configs
-  - Template-based pipelines
-  - Dynamic receiver enabling
-- 🎯 **Blue-Green Config Reload**
-  - Zero-downtime updates
-  - Automatic rollback
-  - Configuration versioning
-
-### Phase 3: GA & Migration (1 month)
-- 🎯 **Infrastructure Agent Migration**
-  - `nrdot-host migrate-infra` command
-  - Config conversion tool
-  - License key migration
-  - Custom attribute preservation
-- 🎯 **Production Packaging**
-  - Official .deb/.rpm packages
-  - APT/YUM repository hosting
-  - Docker image optimization
-  - Installation automation
-- 🎯 **Enterprise Features**
-  - Credential management
-  - Proxy support
-  - Air-gapped mode
-  - Compliance controls
-
-## 📊 Success Metrics
-
-### Phase 1 Targets
-- Process visibility equivalent to Infrastructure agent
-- <150MB memory footprint
-- 100% compatibility with existing host entities
-
-### Phase 2 Targets  
-- Zero-config monitoring for 5+ services (MySQL, Redis, Nginx, etc.)
-- <30 second service detection time
-- 90% reduction in manual configuration
-
-### Phase 3 Targets
-- Seamless migration for 95% of Infrastructure agent users
-- 1-hour migration time for complex environments
-- Feature parity + auto-config advantages
+### Review Documents
+- **Comprehensive Review**: See PROJECT_REVIEW_V2.md
+- **Production Assessment**: See PRODUCTION_READINESS_V2.md
+- **Detailed Action Plan**: See ACTION_PLAN_V2.md
 
 ## 🎯 Implementation Status
 
@@ -237,17 +170,10 @@ sudo nrdot-host migrate-infra
 - **Community**: Slack #nrdot-host
 - **Email**: nrdot-support@newrelic.com
 
-## 📚 Key Documentation
-
-- **Architecture**: [ARCHITECTURE_V2.md](ARCHITECTURE_V2.md) - Linux telemetry collector design
-- **Auto-Configuration**: [AUTO_CONFIGURATION.md](AUTO_CONFIGURATION.md) - Zero-touch setup guide
-- **Migration Guide**: [INFRASTRUCTURE_MIGRATION.md](INFRASTRUCTURE_MIGRATION.md) - Transition from Infrastructure agent
-- **Review Documents**: PROJECT_REVIEW_V2.md, PRODUCTION_READINESS_V2.md, ACTION_PLAN_V2.md
-
 ---
 
 *Last Updated: 2025-06-18*  
-*Current Version: 2.0.0 (Unified Architecture)*  
-*Target Version: 3.0.0 (Auto-Configuration)*  
-*Status: Evolving to Linux Telemetry Collector*  
-*Timeline: 3-6 months to full transformation*
+*Version: 2.0.0*  
+*Status: Production Ready with Conditions*  
+*Architecture: Unified Binary (v2.0)*  
+*Implementation: Complete*

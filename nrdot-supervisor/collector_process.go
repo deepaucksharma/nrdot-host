@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -153,11 +154,21 @@ func (c *CollectorProcess) IsHealthy() bool {
 	}
 	
 	url := fmt.Sprintf("http://localhost:%d/", port)
-	resp, err := http.Get(url)
+	
+	// Create HTTP client with timeout
+	client := &http.Client{
+		Timeout: 3 * time.Second,
+	}
+	
+	resp, err := client.Get(url)
 	if err != nil {
+		c.Logger.Debug("Health check failed", zap.String("url", url), zap.Error(err))
 		return false
 	}
 	defer resp.Body.Close()
+	
+	// Drain response body to reuse connection
+	io.Copy(io.Discard, resp.Body)
 	
 	return resp.StatusCode == http.StatusOK
 }
@@ -175,22 +186,17 @@ func (c *CollectorProcess) GetMetrics() (models.ResourceMetrics, error) {
 	pid := c.cmd.Process.Pid
 	c.mu.Unlock()
 	
-	// Read from /proc on Linux
-	if runtime.GOOS == "linux" {
-		// CPU usage
-		stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
-		if err == nil {
-			// Parse CPU stats (simplified)
-			metrics.CPUPercent = 10.0 // Placeholder
-		}
-		
-		// Memory usage
-		status, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", pid))
-		if err == nil {
-			// Parse memory stats (simplified)
-			metrics.MemoryBytes = 104857600  // 100MB placeholder
-			metrics.MemoryPercent = 5.0
-		}
+	// Get actual process statistics
+	stats, err := GetProcessStats(pid)
+	if err != nil {
+		c.Logger.Debug("Failed to get process stats", zap.Error(err))
+		// Continue with other metrics even if process stats fail
+	} else {
+		metrics.CPUPercent = stats.CPUPercent
+		metrics.MemoryBytes = stats.MemoryBytes
+		metrics.MemoryPercent = stats.MemoryPercent
+		metrics.OpenFiles = stats.OpenFiles
+		metrics.ThreadCount = stats.ThreadCount
 	}
 	
 	// Get metrics from collector's prometheus endpoint
@@ -269,15 +275,47 @@ func (c *CollectorProcess) waitForExit() {
 type logWriter struct {
 	logger *zap.Logger
 	level  string
+	buffer []byte
 }
 
 func (w *logWriter) Write(p []byte) (n int, err error) {
-	msg := string(p)
-	switch w.level {
-	case "error":
-		w.logger.Error(msg)
-	default:
-		w.logger.Info(msg)
+	// Append to buffer
+	w.buffer = append(w.buffer, p...)
+	
+	// Process complete lines
+	for {
+		idx := indexByte(w.buffer, '\n')
+		if idx < 0 {
+			break
+		}
+		
+		line := string(w.buffer[:idx])
+		w.buffer = w.buffer[idx+1:]
+		
+		// Skip empty lines
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		
+		// Log based on level
+		switch w.level {
+		case "error":
+			w.logger.Error(line)
+		default:
+			w.logger.Info(line)
+		}
 	}
+	
 	return len(p), nil
+}
+
+// indexByte returns the index of the first instance of c in b, or -1 if not found
+func indexByte(b []byte, c byte) int {
+	for i, v := range b {
+		if v == c {
+			return i
+		}
+	}
+	return -1
 }
