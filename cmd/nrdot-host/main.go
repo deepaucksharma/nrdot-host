@@ -50,6 +50,8 @@ func main() {
 		enableAuth    = flag.Bool("auth", false, "Enable API authentication")
 		authType      = flag.String("auth-type", "jwt", "Authentication type: jwt, api-key, both")
 		authSecret    = flag.String("auth-secret", "", "Authentication secret key (auto-generated if empty)")
+		rateLimitRate = flag.Int("rate-limit", 100, "API rate limit (requests per minute)")
+		rateLimitBurst = flag.Int("rate-burst", 20, "API rate limit burst size")
 	)
 	
 	flag.Parse()
@@ -85,7 +87,7 @@ func main() {
 	var err error
 	switch runMode {
 	case ModeAll:
-		err = runAll(ctx, logger, *configFile, *collectorPath, *workDir, *apiAddr, *enableTelemetry, authConfig)
+		err = runAll(ctx, logger, *configFile, *collectorPath, *workDir, *apiAddr, *enableTelemetry, authConfig, *rateLimitRate, *rateLimitBurst)
 	case ModeAgent:
 		err = runAgent(ctx, logger, *configFile, *collectorPath, *workDir, *enableTelemetry)
 	case ModeAPI:
@@ -104,7 +106,7 @@ func main() {
 }
 
 // runAll runs all components in a single process
-func runAll(ctx context.Context, logger *zap.Logger, configFile, collectorPath, workDir, apiAddr string, enableTelemetry bool, authConfig auth.Config) error {
+func runAll(ctx context.Context, logger *zap.Logger, configFile, collectorPath, workDir, apiAddr string, enableTelemetry bool, authConfig auth.Config, rateLimitRate, rateLimitBurst int) error {
 	logger.Info("Running in ALL mode - unified process")
 	
 	// Create unified supervisor with everything embedded
@@ -114,10 +116,15 @@ func runAll(ctx context.Context, logger *zap.Logger, configFile, collectorPath, 
 		WorkDir:             workDir,
 		APIEnabled:          true,
 		APIListenAddr:       apiAddr,
-		RestartDelay:        5,
+		RestartDelay:        5 * time.Second,
 		MaxRestarts:         10,
-		HealthCheckInterval: 30,
+		HealthCheckInterval: 30 * time.Second,
 		EnableTelemetry:     enableTelemetry,
+		// Rate limiting
+		RateLimitEnabled:    rateLimitRate > 0,
+		RateLimitRate:       rateLimitRate,
+		RateLimitInterval:   time.Minute,
+		RateLimitBurst:      rateLimitBurst,
 		Logger:              logger,
 	}
 	
@@ -163,9 +170,9 @@ func runAgent(ctx context.Context, logger *zap.Logger, configFile, collectorPath
 		ConfigPath:          configFile,
 		WorkDir:             workDir,
 		APIEnabled:          false, // No API in agent mode
-		RestartDelay:        5,
+		RestartDelay:        5 * time.Second,
 		MaxRestarts:         10,
-		HealthCheckInterval: 30,
+		HealthCheckInterval: 30 * time.Second,
 		EnableTelemetry:     enableTelemetry,
 		Logger:              logger,
 	}

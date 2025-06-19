@@ -1,0 +1,122 @@
+name: Documentation Sync Check
+
+on:
+  pull_request:
+    paths:
+      - '**.md'
+      - 'docs/**'
+      - '.github/workflows/docs-check.yml'
+  push:
+    branches: [main]
+    paths:
+      - '**.md'
+      - 'docs/**'
+
+jobs:
+  docs-check:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Check documentation structure
+      run: |
+        # Ensure required documentation exists
+        required_docs=(
+          "README.md"
+          "CONTRIBUTING.md"
+          "SECURITY.md"
+          "docs/architecture/ARCHITECTURE.md"
+          "docs/roadmap/ROADMAP.md"
+          "docs/roadmap/PROJECT_STATUS.md"
+          "docs/roadmap/PHASE_CHECKLISTS.md"
+          "docs/auto-config/AUTO_CONFIGURATION.md"
+          "docs/auto-config/baseline_schema.json"
+          "docs/migration/INFRASTRUCTURE_MIGRATION.md"
+          "docs/config-schema/config.yaml.tmpl"
+        )
+        
+        missing=0
+        for doc in "${required_docs[@]}"; do
+          if [ ! -f "$doc" ]; then
+            echo "❌ Missing required document: $doc"
+            missing=$((missing + 1))
+          else
+            echo "✅ Found: $doc"
+          fi
+        done
+        
+        if [ $missing -gt 0 ]; then
+          echo "❌ $missing required documents are missing"
+          exit 1
+        fi
+        
+        echo "✅ All required documents present"
+    
+    - name: Check for outdated references
+      run: |
+        echo "Checking for outdated references..."
+        
+        # Check for old v1.0 references
+        if grep -r "v1\.0" --include="*.md" docs/ README.md; then
+          echo "⚠️  Found v1.0 references - please update to v2.0+"
+        fi
+        
+        # Check for cross-platform references
+        if grep -rE "(Windows|macOS|darwin)" --include="*.md" docs/ README.md; then
+          echo "⚠️  Found cross-platform references - NRDOT-HOST is Linux-only"
+        fi
+        
+        # Check for outdated repo URLs
+        if grep -r "deepaucksharma/nrdot-host" --include="*.md" .; then
+          echo "❌ Found old repository URLs - update to newrelic/nrdot-host"
+          exit 1
+        fi
+    
+    - name: Validate JSON schemas
+      run: |
+        # Check baseline schema is valid JSON
+        if ! python3 -m json.tool docs/auto-config/baseline_schema.json > /dev/null; then
+          echo "❌ Invalid JSON in baseline_schema.json"
+          exit 1
+        fi
+        echo "✅ baseline_schema.json is valid"
+    
+    - name: Check documentation consistency
+      run: |
+        # Ensure phase timelines are consistent
+        phase1_count=$(grep -c "Phase 1.*4 weeks" docs/roadmap/*.md || true)
+        phase2_count=$(grep -c "Phase 2.*6 weeks" docs/roadmap/*.md || true)
+        phase3_count=$(grep -c "Phase 3.*4 weeks" docs/roadmap/*.md || true)
+        
+        echo "Phase timeline mentions:"
+        echo "  Phase 1 (4 weeks): $phase1_count"
+        echo "  Phase 2 (6 weeks): $phase2_count"
+        echo "  Phase 3 (4 weeks): $phase3_count"
+        
+        # Check that auto-config is marked as Phase 2
+        if ! grep -q "Phase 2.*[Aa]uto.*[Cc]onfig" docs/roadmap/ROADMAP.md; then
+          echo "⚠️  Auto-configuration should be in Phase 2"
+        fi
+        
+        # Check that migration is marked as Phase 3
+        if ! grep -q "Phase 3.*[Mm]igration" docs/roadmap/ROADMAP.md; then
+          echo "⚠️  Migration tools should be in Phase 3"
+        fi
+
+    - name: Documentation report
+      if: always()
+      run: |
+        echo "## Documentation Check Summary"
+        echo ""
+        echo "### Key Documents Status:"
+        echo "- Architecture: docs/architecture/ARCHITECTURE.md"
+        echo "- Roadmap: docs/roadmap/ROADMAP.md" 
+        echo "- Auto-Config: docs/auto-config/AUTO_CONFIGURATION.md"
+        echo "- Migration: docs/migration/INFRASTRUCTURE_MIGRATION.md"
+        echo ""
+        echo "### Reminders:"
+        echo "- NRDOT-HOST is Linux-only"
+        echo "- Current version: v2.0.x"
+        echo "- Target version: v3.0.0 (with auto-config)"
+        echo "- Timeline: 4 months total"

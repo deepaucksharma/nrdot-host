@@ -1,0 +1,18 @@
+metrics:
+  enabled: true
+  interval: 30s
+  exporters:
+    newrelic:
+      api_key: test-key
+      endpoint: https://metric-api.newrelic.com/metric/v1
+
+logs:
+  enabled: false
+
+traces:
+  enabled: false
+
+processing:
+  enrich:
+    add_host_metadata: true
+    add_cloud_metadata: false

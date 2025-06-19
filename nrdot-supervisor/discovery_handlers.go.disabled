@@ -1,0 +1,181 @@
+package supervisor
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"time"
+
+	"github.com/newrelic/nrdot-host/nrdot-autoconfig"
+	"github.com/newrelic/nrdot-host/nrdot-discovery"
+	"go.uber.org/zap"
+)
+
+// DiscoveryHandlers provides HTTP handlers for discovery endpoints
+type DiscoveryHandlers struct {
+	logger       *zap.Logger
+	discovery    *discovery.ServiceDiscovery
+	orchestrator *autoconfig.AutoConfigOrchestrator
+	generator    *autoconfig.ConfigGenerator
+}
+
+// NewDiscoveryHandlers creates new discovery handlers
+func NewDiscoveryHandlers(logger *zap.Logger, orchestrator *autoconfig.AutoConfigOrchestrator) *DiscoveryHandlers {
+	return &DiscoveryHandlers{
+		logger:       logger,
+		discovery:    discovery.NewServiceDiscovery(logger),
+		orchestrator: orchestrator,
+		generator:    autoconfig.NewConfigGenerator(logger),
+	}
+}
+
+// RunDiscovery handles GET /v1/discovery
+func (h *DiscoveryHandlers) RunDiscovery(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	startTime := time.Now()
+
+	// Run discovery
+	services, err := h.discovery.Discover(ctx)
+	if err != nil {
+		h.logger.Error("Discovery failed", zap.Error(err))
+		h.writeError(w, http.StatusInternalServerError, "Discovery failed", err)
+		return
+	}
+
+	duration := time.Since(startTime)
+
+	// Build response
+	response := map[string]interface{}{
+		"discovery_id":        generateDiscoveryID(),
+		"timestamp":          time.Now().UTC(),
+		"discovered_services": services,
+		"scan_duration_ms":    duration.Milliseconds(),
+		"errors":             []interface{}{}, // Would include non-fatal errors
+	}
+
+	h.writeJSON(w, http.StatusOK, response)
+}
+
+// GetDiscoveryStatus handles GET /v1/discovery/status
+func (h *DiscoveryHandlers) GetDiscoveryStatus(w http.ResponseWriter, r *http.Request) {
+	if h.orchestrator == nil {
+		h.writeError(w, http.StatusServiceUnavailable, "Auto-configuration not enabled", nil)
+		return
+	}
+
+	status := h.orchestrator.GetStatus()
+	h.writeJSON(w, http.StatusOK, status)
+}
+
+// PreviewConfig handles POST /v1/discovery/preview
+func (h *DiscoveryHandlers) PreviewConfig(w http.ResponseWriter, r *http.Request) {
+	// Parse request
+	var req struct {
+		Services []string `json:"services"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeError(w, http.StatusBadRequest, "Invalid request body", err)
+		return
+	}
+
+	// Convert service names to ServiceInfo
+	var services []discovery.ServiceInfo
+	for _, svcName := range req.Services {
+		services = append(services, discovery.ServiceInfo{
+			Type:         svcName,
+			DiscoveredBy: []string{"manual"},
+			Confidence:   "HIGH",
+			// Add default endpoints based on service type
+			Endpoints: h.getDefaultEndpoints(svcName),
+		})
+	}
+
+	// Generate configuration preview
+	config, err := h.generator.GenerateConfig(context.Background(), services)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "Failed to generate config", err)
+		return
+	}
+
+	// Build response
+	response := map[string]interface{}{
+		"preview": map[string]interface{}{
+			"receivers": h.extractSection(config.Config, "receivers"),
+			"pipelines": h.extractSection(config.Config, "pipelines"),
+		},
+		"template_version":   "1.0",
+		"variables_required": config.RequiredVariables,
+	}
+
+	h.writeJSON(w, http.StatusOK, response)
+}
+
+// Helper methods
+
+func (h *DiscoveryHandlers) writeJSON(w http.ResponseWriter, status int, data interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		h.logger.Error("Failed to encode response", zap.Error(err))
+	}
+}
+
+func (h *DiscoveryHandlers) writeError(w http.ResponseWriter, status int, message string, err error) {
+	response := map[string]interface{}{
+		"error": map[string]interface{}{
+			"code":    http.StatusText(status),
+			"message": message,
+		},
+		"request_id": w.Header().Get("X-Request-ID"),
+		"timestamp":  time.Now().UTC(),
+	}
+
+	if err != nil {
+		response["error"].(map[string]interface{})["details"] = err.Error()
+	}
+
+	h.writeJSON(w, status, response)
+}
+
+func (h *DiscoveryHandlers) getDefaultEndpoints(service string) []discovery.Endpoint {
+	defaults := map[string][]discovery.Endpoint{
+		"mysql": {{Address: "localhost", Port: 3306, Protocol: "tcp"}},
+		"postgresql": {{Address: "localhost", Port: 5432, Protocol: "tcp"}},
+		"redis": {{Address: "localhost", Port: 6379, Protocol: "tcp"}},
+		"nginx": {{Address: "0.0.0.0", Port: 80, Protocol: "tcp"}},
+		"apache": {{Address: "0.0.0.0", Port: 80, Protocol: "tcp"}},
+		"mongodb": {{Address: "localhost", Port: 27017, Protocol: "tcp"}},
+		"elasticsearch": {{Address: "localhost", Port: 9200, Protocol: "tcp"}},
+		"rabbitmq": {{Address: "localhost", Port: 5672, Protocol: "tcp"}},
+		"memcached": {{Address: "localhost", Port: 11211, Protocol: "tcp"}},
+		"kafka": {{Address: "localhost", Port: 9092, Protocol: "tcp"}},
+	}
+
+	if endpoints, ok := defaults[service]; ok {
+		return endpoints
+	}
+
+	return []discovery.Endpoint{}
+}
+
+func (h *DiscoveryHandlers) extractSection(yamlConfig, section string) interface{} {
+	// This would parse YAML and extract the section
+	// For now, return a placeholder
+	return map[string]interface{}{
+		"_comment": "Section would be extracted from generated config",
+	}
+}
+
+func generateDiscoveryID() string {
+	// Generate UUID v4
+	// In production, use a proper UUID library
+	return "550e8400-e29b-41d4-a716-446655440000"
+}
+
+// RegisterDiscoveryRoutes registers discovery routes on the router
+func RegisterDiscoveryRoutes(router interface{}, handlers *DiscoveryHandlers) {
+	// This would be called during API server setup
+	// The actual router type depends on the HTTP framework used
+}

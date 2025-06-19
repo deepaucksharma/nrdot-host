@@ -4,14 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/newrelic/nrdot-host/nrdot-common/pkg/models"
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
-	"io/ioutil"
 )
 
 // standaloneAPIServer runs the API server in standalone mode
@@ -93,7 +94,7 @@ func (s *standaloneAPIServer) Stop(ctx context.Context) error {
 
 // loadConfig loads configuration from file
 func (s *standaloneAPIServer) loadConfig() error {
-	data, err := ioutil.ReadFile(s.configFile)
+	data, err := os.ReadFile(s.configFile)
 	if err != nil {
 		return err
 	}
@@ -163,10 +164,6 @@ func (s *standaloneAPIServer) handleStatus(w http.ResponseWriter, r *http.Reques
 		ConfigVersion: 1,
 		StartTime:     time.Now().Add(-1 * time.Hour), // Placeholder
 		Uptime:        time.Hour,
-		Health: models.HealthStatus{
-			Healthy: true,
-			LastCheck: time.Now(),
-		},
 	}
 	
 	w.Header().Set("Content-Type", "application/json")
@@ -175,7 +172,7 @@ func (s *standaloneAPIServer) handleStatus(w http.ResponseWriter, r *http.Reques
 
 func (s *standaloneAPIServer) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 	// Read current config file
-	data, err := ioutil.ReadFile(s.configFile)
+	data, err := os.ReadFile(s.configFile)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to read config: %v", err), http.StatusInternalServerError)
 		return
@@ -187,7 +184,7 @@ func (s *standaloneAPIServer) handleGetConfig(w http.ResponseWriter, r *http.Req
 
 func (s *standaloneAPIServer) handleValidateConfig(w http.ResponseWriter, r *http.Request) {
 	// Read config from request body
-	body, err := ioutil.ReadAll(r.Body)
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "Failed to read request body", http.StatusBadRequest)
 		return
@@ -229,7 +226,7 @@ func (s *standaloneAPIServer) handleMetrics(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(resp.StatusCode)
 	
 	// Copy body
-	body, _ := ioutil.ReadAll(resp.Body)
+	body, _ := io.ReadAll(resp.Body)
 	w.Write(body)
 }
 

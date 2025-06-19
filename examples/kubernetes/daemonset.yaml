@@ -1,0 +1,339 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nrdot-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nrdot-host
+  namespace: nrdot-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: nrdot-host
+rules:
+  - apiGroups: [""]
+    resources:
+      - nodes
+      - nodes/proxy
+      - nodes/metrics
+      - services
+      - endpoints
+      - pods
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources:
+      - configmaps
+    verbs: ["get"]
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - replicasets
+      - statefulsets
+      - daemonsets
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources:
+      - jobs
+      - cronjobs
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: nrdot-host
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: nrdot-host
+subjects:
+  - kind: ServiceAccount
+    name: nrdot-host
+    namespace: nrdot-system
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nrdot-config
+  namespace: nrdot-system
+data:
+  config.yaml: |
+    license_key: "${NEW_RELIC_LICENSE_KEY}"
+    
+    service:
+      name: "${K8S_NODE_NAME}"
+      environment: "${K8S_CLUSTER_NAME:kubernetes}"
+    
+    auto_config:
+      enabled: true
+      scan_interval: 5m
+    
+    # Kubernetes-specific settings
+    kubernetes:
+      enabled: true
+      node_name: "${K8S_NODE_NAME}"
+      cluster_name: "${K8S_CLUSTER_NAME}"
+      
+    data_dir: /var/lib/nrdot
+    
+    logging:
+      level: info
+      format: json
+    
+    api:
+      enabled: true
+      listen_addr: "0.0.0.0:8080"
+    
+    # Process monitoring with container awareness
+    processes:
+      enabled: true
+      top_n: 50
+      interval: 60s
+      container_runtime: containerd
+      
+    # Host metrics
+    receivers:
+      hostmetrics:
+        collection_interval: 60s
+        root_path: /host
+        scrapers:
+          cpu:
+            metrics:
+              system.cpu.utilization:
+                enabled: true
+          memory:
+            metrics:
+              system.memory.utilization:
+                enabled: true
+          disk:
+            metrics:
+              system.disk.io:
+                enabled: true
+          filesystem:
+            metrics:
+              system.filesystem.utilization:
+                enabled: true
+            mount_points: ["/", "/host", "/var/lib", "/var/log"]
+          network:
+            metrics:
+              system.network.io:
+                enabled: true
+          load:
+            metrics:
+              system.cpu.load_average.1m:
+                enabled: true
+                
+      # Kubernetes metrics receiver
+      k8s_cluster:
+        auth_type: serviceAccount
+        node_conditions_to_report: ["Ready", "MemoryPressure", "DiskPressure"]
+        
+    processors:
+      nrsecurity:
+        enabled: true
+      nrenrich:
+        host_metadata: true
+        cloud_detection: true
+        kubernetes_metadata: true
+      k8sattributes:
+        auth_type: serviceAccount
+        extract:
+          metadata:
+            - k8s.namespace.name
+            - k8s.deployment.name
+            - k8s.statefulset.name
+            - k8s.daemonset.name
+            - k8s.job.name
+            - k8s.pod.name
+            - k8s.node.name
+      resource:
+        attributes:
+          - key: k8s.cluster.name
+            value: "${K8S_CLUSTER_NAME}"
+            action: insert
+          - key: service.instance.id
+            value: "${K8S_POD_NAME}"
+            action: insert
+      batch:
+        timeout: 10s
+        send_batch_size: 1000
+      memory_limiter:
+        check_interval: 1s
+        limit_mib: 1024
+        spike_limit_mib: 256
+        
+    exporters:
+      otlp/newrelic:
+        endpoint: "${OTLP_ENDPOINT:otlp.nr-data.net:4317}"
+        headers:
+          api-key: "${NEW_RELIC_LICENSE_KEY}"
+        compression: gzip
+        
+    service:
+      pipelines:
+        metrics:
+          receivers: [hostmetrics, k8s_cluster]
+          processors: [nrsecurity, nrenrich, k8sattributes, resource, batch, memory_limiter]
+          exporters: [otlp/newrelic]
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nrdot-host
+  namespace: nrdot-system
+  labels:
+    app: nrdot-host
+spec:
+  selector:
+    matchLabels:
+      app: nrdot-host
+  template:
+    metadata:
+      labels:
+        app: nrdot-host
+    spec:
+      serviceAccountName: nrdot-host
+      hostNetwork: true
+      hostPID: true
+      hostIPC: true
+      dnsPolicy: ClusterFirstWithHostNet
+      priorityClassName: system-node-critical
+      containers:
+        - name: nrdot-host
+          image: nrdot-host:latest
+          imagePullPolicy: Always
+          securityContext:
+            privileged: true
+            capabilities:
+              add:
+                - SYS_PTRACE
+                - SYS_ADMIN
+                - DAC_READ_SEARCH
+          env:
+            - name: NEW_RELIC_LICENSE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: nrdot-license
+                  key: license-key
+            - name: K8S_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: K8S_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: K8S_POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: K8S_CLUSTER_NAME
+              value: "my-k8s-cluster"  # Set your cluster name
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nrdot
+              readOnly: true
+            - name: host-root
+              mountPath: /host
+              readOnly: true
+            - name: proc
+              mountPath: /host/proc
+              readOnly: true
+            - name: sys
+              mountPath: /host/sys
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/nrdot
+            - name: logs
+              mountPath: /var/log/nrdot
+            - name: docker-sock
+              mountPath: /var/run/docker.sock
+              readOnly: true
+            - name: containerd-sock
+              mountPath: /run/containerd/containerd.sock
+              readOnly: true
+          ports:
+            - name: api
+              containerPort: 8080
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: api
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: api
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: config
+          configMap:
+            name: nrdot-config
+        - name: host-root
+          hostPath:
+            path: /
+        - name: proc
+          hostPath:
+            path: /proc
+        - name: sys
+          hostPath:
+            path: /sys
+        - name: data
+          hostPath:
+            path: /var/lib/nrdot
+            type: DirectoryOrCreate
+        - name: logs
+          hostPath:
+            path: /var/log/nrdot
+            type: DirectoryOrCreate
+        - name: docker-sock
+          hostPath:
+            path: /var/run/docker.sock
+            type: SocketOrCreate
+        - name: containerd-sock
+          hostPath:
+            path: /run/containerd/containerd.sock
+            type: SocketOrCreate
+      tolerations:
+        - effect: NoSchedule
+          operator: Exists
+        - effect: NoExecute
+          operator: Exists
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nrdot-host
+  namespace: nrdot-system
+  labels:
+    app: nrdot-host
+spec:
+  type: ClusterIP
+  ports:
+    - name: api
+      port: 8080
+      targetPort: api
+      protocol: TCP
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+      protocol: TCP
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+      protocol: TCP
+  selector:
+    app: nrdot-host

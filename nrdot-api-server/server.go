@@ -35,6 +35,17 @@ type Config struct {
 	Version     string
 	EnableCORS  bool
 	EnableDebug bool
+	RateLimit   RateLimitConfig
+}
+
+// RateLimitConfig represents rate limiting configuration
+type RateLimitConfig struct {
+	Enabled    bool
+	Rate       int           // requests per interval
+	Interval   time.Duration // time interval
+	BucketSize int           // max burst size
+	ByIP       bool          // rate limit by IP
+	ByAPIKey   bool          // rate limit by API key
 }
 
 // NewServer creates a new API server
@@ -121,6 +132,28 @@ func (s *Server) buildHandler() http.Handler {
 
 	// Recovery (catch panics)
 	handler = middleware.RecoveryMiddleware(s.logger)(handler)
+
+	// Rate limiting if enabled
+	if s.config.RateLimit.Enabled {
+		rateLimiter := middleware.NewRateLimiter(
+			s.config.RateLimit.Rate,
+			s.config.RateLimit.Interval,
+			s.config.RateLimit.BucketSize,
+			s.logger.Named("ratelimit"),
+		)
+		
+		// Choose key extraction function
+		var keyFunc func(*http.Request) string
+		if s.config.RateLimit.ByAPIKey {
+			keyFunc = middleware.APIKeyFunc
+		} else if s.config.RateLimit.ByIP {
+			keyFunc = middleware.IPKeyFunc
+		} else {
+			keyFunc = middleware.EndpointKeyFunc
+		}
+		
+		handler = rateLimiter.RateLimitMiddleware(keyFunc)(handler)
+	}
 
 	// CORS if enabled
 	if s.config.EnableCORS {

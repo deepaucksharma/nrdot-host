@@ -18,11 +18,12 @@ NRDOT-HOST adds:
 Yes! NRDOT-HOST is licensed under Apache 2.0. You can use, modify, and distribute it freely.
 
 ### What platforms are supported?
-- Linux (x86_64, ARM64): Ubuntu, Debian, RHEL, CentOS, Amazon Linux
-- macOS (Intel, Apple Silicon)
-- Windows Server 2016+
-- Docker containers
-- Kubernetes
+**Current (v2.0)**: Linux-only support
+- Linux (x86_64, ARM64): Ubuntu, Debian, RHEL, CentOS, Amazon Linux, SUSE
+- Minimum kernel: 3.10+
+- Container environments: Docker, Podman
+
+**Note**: Starting with v2.0, NRDOT-HOST is a Linux-only telemetry collector. Windows and macOS support have been removed to focus on Linux-specific capabilities.
 
 ## Installation & Setup
 
@@ -55,6 +56,13 @@ exporters:
   otlp:
     endpoint: "your-backend:4317"
 ```
+
+### What is auto-configuration? (Coming in Phase 2)
+Auto-configuration will automatically discover services running on your host and configure monitoring without manual YAML editing. It will:
+- Detect services like MySQL, PostgreSQL, Redis, Nginx, Apache
+- Generate optimal OpenTelemetry configurations
+- Apply configurations with zero downtime
+- Use cryptographically signed configs for security
 
 ## Configuration
 
@@ -207,6 +215,51 @@ processors:
       hipaa: true
       gdpr: true
 ```
+
+## Auto-Configuration (Phase 2 - Coming Soon)
+
+### How will auto-configuration work?
+Once implemented, auto-configuration will:
+1. Scan for running services using /proc, ports, and config files
+2. Report discovered services to New Relic
+3. Receive optimized configurations
+4. Apply configurations using blue-green deployment
+5. Monitor and report service health
+
+### Which services will be auto-configured?
+Phase 2.0 will support:
+- MySQL/MariaDB (metrics + logs)
+- PostgreSQL (metrics + logs)  
+- Redis (metrics + logs)
+- Nginx (metrics + logs)
+- Apache (metrics + logs)
+
+Later phases will add MongoDB, Elasticsearch, RabbitMQ, and more.
+
+### Can I disable auto-configuration?
+Yes, you'll be able to disable it entirely or for specific services:
+```yaml
+auto_config:
+  enabled: false  # Disable completely
+  # OR exclude specific services:
+  exclude_services:
+    - redis
+    - nginx
+```
+
+### How will credentials be handled?
+Service credentials will be managed securely via:
+- Environment variables (Phase 2.0)
+- Encrypted secrets file (Phase 2.5)
+- Never transmitted to New Relic
+- Never stored in configs
+
+### What if auto-configuration fails?
+The system will:
+- Continue with existing configuration
+- Log detailed error information
+- Report issues to New Relic for troubleshooting
+- Never break working monitoring
 
 ## Operations
 

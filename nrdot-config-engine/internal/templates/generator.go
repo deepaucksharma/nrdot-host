@@ -3,7 +3,6 @@ package templates
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/newrelic/nrdot-host/nrdot-common/pkg/models"
 )

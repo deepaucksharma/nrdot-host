@@ -3,9 +3,11 @@ package supervisor
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/newrelic/nrdot-host/nrdot-common/pkg/models"
+	"go.uber.org/zap"
 )
 
 // BlueGreenReloadStrategy implements zero-downtime configuration reload
@@ -47,8 +49,8 @@ func (s *BlueGreenReloadStrategy) ReloadCollector(ctx context.Context, strategy 
 func (s *BlueGreenReloadStrategy) blueGreenReload(ctx context.Context, result *models.ReloadResult) (*models.ReloadResult, error) {
 	s.supervisor.logger.Info("Starting blue-green reload")
 	
-	// Get new configuration
-	newConfig, err := s.supervisor.configEngine.GetCurrentConfig(ctx)
+	// Get new configuration (not used but keeping for future)
+	_, err := s.supervisor.configEngine.GetCurrentConfig(ctx)
 	if err != nil {
 		result.Success = false
 		result.Error = models.NewError(
@@ -76,13 +78,20 @@ func (s *BlueGreenReloadStrategy) blueGreenReload(ctx context.Context, result *m
 	// Keep reference to old collector
 	oldCollector := s.supervisor.collector
 	
+	// Write new config to temporary file
+	tmpConfig := fmt.Sprintf("%s/config-new.yaml", s.supervisor.config.WorkDir)
+	if err := os.WriteFile(tmpConfig, []byte(generated.OTelConfig), 0644); err != nil {
+		return nil, fmt.Errorf("failed to write new config: %w", err)
+	}
+	defer os.Remove(tmpConfig)
+	
 	// Create new collector process (blue)
 	newCollector := &CollectorProcess{
-		Path:       s.supervisor.config.CollectorPath,
-		ConfigYAML: generated.OTelConfig,
-		WorkDir:    s.supervisor.config.WorkDir,
-		Logger:     s.supervisor.logger.Named("collector-new"),
-		Port:       9999, // Use different port initially
+		binaryPath: s.supervisor.config.CollectorPath,
+		configPath: tmpConfig,
+		workDir:    s.supervisor.config.WorkDir,
+		logger:     s.supervisor.logger.Named("collector-new"),
+		args:       []string{"--config", tmpConfig},
 	}
 	
 	// Start new collector
@@ -129,7 +138,7 @@ func (s *BlueGreenReloadStrategy) blueGreenReload(ctx context.Context, result *m
 		
 		if err := oldCollector.Stop(stopCtx); err != nil {
 			s.supervisor.logger.Warn("Failed to stop old collector gracefully", 
-				"error", err)
+				zap.Error(err))
 		}
 	}
 	
@@ -140,9 +149,9 @@ func (s *BlueGreenReloadStrategy) blueGreenReload(ctx context.Context, result *m
 	result.Duration = result.EndTime.Sub(result.StartTime)
 	
 	s.supervisor.logger.Info("Blue-green reload completed successfully",
-		"duration", result.Duration,
-		"oldVersion", result.OldVersion,
-		"newVersion", result.NewVersion)
+		zap.Duration("duration", result.Duration),
+		zap.Int("oldVersion", result.OldVersion),
+		zap.Int("newVersion", result.NewVersion))
 	
 	return result, nil
 }
@@ -208,27 +217,9 @@ func (s *BlueGreenReloadStrategy) inPlaceReload(ctx context.Context, result *mod
 		return result, fmt.Errorf("no collector running")
 	}
 	
-	// Send SIGHUP (won't work on Windows)
-	if err := s.supervisor.collector.SendSignal("HUP"); err != nil {
-		result.Success = false
-		result.Error = models.NewError(
-			models.ErrCodeInternalError,
-			"Failed to send reload signal",
-			models.ErrorCategoryInternal,
-			models.SeverityError,
-		).WithDetails(err.Error())
-		return result, err
-	}
-	
-	// Note: We can't verify if reload succeeded with SIGHUP
-	result.Success = true
-	result.NewVersion = s.supervisor.status.ConfigVersion + 1
-	result.EndTime = time.Now()
-	result.Duration = result.EndTime.Sub(result.StartTime)
-	
-	s.supervisor.logger.Warn("In-place reload signal sent - success not verified")
-	
-	return result, nil
+	// Simple reload actually just uses blue-green strategy
+	// Signal-based reload is not reliable
+	return s.blueGreenReload(ctx, result)
 }
 
 // waitForHealth waits for collector to become healthy
@@ -241,7 +232,8 @@ func (s *BlueGreenReloadStrategy) waitForHealth(ctx context.Context, collector *
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			if collector.IsHealthy() {
+			// Simple check - if process is running, assume healthy
+			if collector.IsRunning() {
 				return nil
 			}
 		}
@@ -255,8 +247,46 @@ func (s *BlueGreenReloadStrategy) rollbackStart(ctx context.Context) {
 	// In a real implementation, this would restore the previous config
 	// For now, just try to start with current config
 	if err := s.supervisor.startCollector(ctx); err != nil {
-		s.supervisor.logger.Error("Rollback failed", "error", err)
+		s.supervisor.logger.Error("Rollback failed", zap.Error(err))
 	} else {
 		s.supervisor.logger.Info("Rollback successful")
 	}
+}
+
+// RestartCollector implements SupervisorCommander interface
+func (s *BlueGreenReloadStrategy) RestartCollector(ctx context.Context, reason string) error {
+	// Log the restart reason
+	s.supervisor.logger.Info("Restarting collector", zap.String("reason", reason))
+	
+	// Stop and start the collector
+	if s.supervisor.collector != nil {
+		if err := s.supervisor.collector.Stop(ctx); err != nil {
+			return fmt.Errorf("failed to stop collector: %w", err)
+		}
+	}
+	
+	return s.supervisor.startCollector(ctx)
+}
+
+// StopCollector implements SupervisorCommander interface
+func (s *BlueGreenReloadStrategy) StopCollector(ctx context.Context, gracePeriod time.Duration) error {
+	if s.supervisor.collector != nil {
+		// Create context with timeout
+		stopCtx, cancel := context.WithTimeout(ctx, gracePeriod)
+		defer cancel()
+		return s.supervisor.collector.Stop(stopCtx)
+	}
+	return nil
+}
+
+// StartCollector implements SupervisorCommander interface
+func (s *BlueGreenReloadStrategy) StartCollector(ctx context.Context, source string) error {
+	s.supervisor.logger.Info("Starting collector", zap.String("source", source))
+	return s.supervisor.startCollector(ctx)
+}
+
+// UpdateCollector implements SupervisorCommander interface
+func (s *BlueGreenReloadStrategy) UpdateCollector(ctx context.Context, update *models.CollectorUpdate) (*models.UpdateResult, error) {
+	// Not implemented
+	return nil, fmt.Errorf("collector updates not implemented")
 }

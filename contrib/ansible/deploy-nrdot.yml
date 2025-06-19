@@ -1,0 +1,175 @@
+---
+# Ansible playbook for NRDOT-HOST deployment
+# Usage: ansible-playbook -i inventory deploy-nrdot.yml
+
+- name: Deploy NRDOT-HOST
+  hosts: all
+  become: yes
+  vars:
+    nrdot_version: "latest"
+    nrdot_user: "nrdot"
+    nrdot_group: "nrdot"
+    nrdot_config_dir: "/etc/nrdot"
+    nrdot_data_dir: "/var/lib/nrdot"
+    nrdot_log_dir: "/var/log/nrdot"
+    nrdot_bin_dir: "/usr/local/bin"
+    
+  tasks:
+    - name: Check OS distribution
+      fail:
+        msg: "This playbook requires a Linux distribution"
+      when: ansible_os_family != "RedHat" and ansible_os_family != "Debian"
+      
+    - name: Create NRDOT user
+      user:
+        name: "{{ nrdot_user }}"
+        group: "{{ nrdot_group }}"
+        system: yes
+        shell: /bin/false
+        home: "{{ nrdot_data_dir }}"
+        create_home: no
+        
+    - name: Create directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ nrdot_user }}"
+        group: "{{ nrdot_group }}"
+        mode: "{{ item.endswith('nrdot') and '0750' or '0755' }}"
+      loop:
+        - "{{ nrdot_config_dir }}"
+        - "{{ nrdot_data_dir }}"
+        - "{{ nrdot_log_dir }}"
+        
+    - name: Download NRDOT-HOST binary
+      get_url:
+        url: "https://github.com/newrelic/nrdot-host/releases/download/{{ nrdot_version }}/nrdot-host_linux_{{ ansible_architecture }}"
+        dest: "{{ nrdot_bin_dir }}/nrdot-host"
+        owner: root
+        group: root
+        mode: '0755'
+        
+    - name: Download NRDOT-Helper binary
+      get_url:
+        url: "https://github.com/newrelic/nrdot-host/releases/download/{{ nrdot_version }}/nrdot-helper_linux_{{ ansible_architecture }}"
+        dest: "{{ nrdot_bin_dir }}/nrdot-helper"
+        owner: root
+        group: "{{ nrdot_group }}"
+        mode: '4750'  # Setuid
+        
+    - name: Deploy configuration template
+      template:
+        src: config.yaml.j2
+        dest: "{{ nrdot_config_dir }}/config.yaml"
+        owner: "{{ nrdot_user }}"
+        group: "{{ nrdot_group }}"
+        mode: '0640'
+      notify: restart nrdot-host
+      
+    - name: Deploy environment file
+      template:
+        src: nrdot.env.j2
+        dest: "{{ nrdot_config_dir }}/nrdot.env"
+        owner: "{{ nrdot_user }}"
+        group: "{{ nrdot_group }}"
+        mode: '0600'
+      notify: restart nrdot-host
+      
+    - name: Deploy systemd service
+      copy:
+        src: ../systemd/nrdot-host.service
+        dest: /etc/systemd/system/nrdot-host.service
+        owner: root
+        group: root
+        mode: '0644'
+      notify:
+        - reload systemd
+        - restart nrdot-host
+        
+    - name: Set SELinux context (RedHat)
+      sefcontext:
+        target: "{{ nrdot_bin_dir }}/nrdot-host"
+        setype: bin_t
+        state: present
+      when: ansible_os_family == "RedHat" and ansible_selinux.status == "enabled"
+      
+    - name: Apply SELinux context (RedHat)
+      command: restorecon -v {{ nrdot_bin_dir }}/nrdot-host
+      when: ansible_os_family == "RedHat" and ansible_selinux.status == "enabled"
+      
+    - name: Enable and start NRDOT-HOST
+      systemd:
+        name: nrdot-host
+        enabled: yes
+        state: started
+        daemon_reload: yes
+        
+    - name: Wait for NRDOT-HOST to be ready
+      uri:
+        url: "http://localhost:8080/health"
+        status_code: 200
+      register: result
+      until: result.status == 200
+      retries: 30
+      delay: 2
+      when: nrdot_api_enabled | default(false)
+      
+    - name: Run initial discovery
+      command: "{{ nrdot_bin_dir }}/nrdot-host discover --save"
+      become_user: "{{ nrdot_user }}"
+      register: discovery_result
+      changed_when: false
+      
+    - name: Display discovery results
+      debug:
+        var: discovery_result.stdout_lines
+        
+  handlers:
+    - name: reload systemd
+      systemd:
+        daemon_reload: yes
+        
+    - name: restart nrdot-host
+      systemd:
+        name: nrdot-host
+        state: restarted
+        
+# Templates (save as templates/config.yaml.j2)
+# ---
+# license_key: "{{ new_relic_license_key }}"
+# 
+# service:
+#   name: "{{ ansible_hostname }}"
+#   environment: "{{ nrdot_environment | default('production') }}"
+#   
+# auto_config:
+#   enabled: {{ nrdot_auto_config | default(true) }}
+#   scan_interval: {{ nrdot_scan_interval | default('5m') }}
+#   
+# processes:
+#   enabled: true
+#   top_n: {{ nrdot_process_top_n | default(50) }}
+#   interval: {{ nrdot_process_interval | default('60s') }}
+#   
+# data_dir: {{ nrdot_data_dir }}
+# log_dir: {{ nrdot_log_dir }}
+# 
+# logging:
+#   level: {{ nrdot_log_level | default('info') }}
+#   format: json
+#   
+# api:
+#   enabled: {{ nrdot_api_enabled | default(false) }}
+#   listen_addr: "{{ nrdot_api_listen | default('127.0.0.1:8080') }}"
+
+# Templates (save as templates/nrdot.env.j2)
+# NEW_RELIC_LICENSE_KEY={{ new_relic_license_key }}
+# {% if new_relic_api_key is defined %}
+# NEW_RELIC_API_KEY={{ new_relic_api_key }}
+# {% endif %}
+# {% if mysql_monitor_pass is defined %}
+# MYSQL_MONITOR_PASS={{ mysql_monitor_pass }}
+# {% endif %}
+# {% if postgres_monitor_pass is defined %}
+# POSTGRES_MONITOR_PASS={{ postgres_monitor_pass }}
+# {% endif %}

@@ -1,4 +1,4 @@
-module github.com/newrelic/nrdot-host/otel-processor-nrtransform
+module github.com/newrelic/nrdot-host/processors/nrtransform
 
 go 1.21
 

@@ -17,7 +17,7 @@ BUILD_TIME := $(shell date -u +%Y%m%d-%H%M%S)
 LDFLAGS := -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildTime=$(BUILD_TIME)
 
 # Component directories
-COMPONENTS := otel-processor-common \
+COMPONENTS := processors/common \
               nrdot-schema \
               nrdot-template-lib \
               nrdot-telemetry-client \
@@ -25,15 +25,16 @@ COMPONENTS := otel-processor-common \
               nrdot-api-server \
               nrdot-config-engine \
               nrdot-supervisor \
-              otel-processor-nrsecurity \
-              otel-processor-nrenrich \
-              otel-processor-nrtransform \
-              otel-processor-nrcap \
-              nrdot-ctl
+              processors/nrsecurity \
+              processors/nrenrich \
+              processors/nrtransform \
+              processors/nrcap \
+              nrdot-ctl \
+              cmd/nrdot-host
 
 # Output directory
-BIN_DIR := bin
-DIST_DIR := dist
+BIN_DIR := build/bin
+DIST_DIR := build/dist
 
 ## Default target - build all components
 all: clean build
@@ -43,8 +44,14 @@ build: $(BIN_DIR)
 	@echo "Building all NRDOT-HOST components..."
 	@for component in $(COMPONENTS); do \
 		echo "Building $$component..." ; \
-		cd $$component && $(GO) build -ldflags "$(LDFLAGS)" -o ../$(BIN_DIR)/$$component ./... || exit 1 ; \
-		cd .. ; \
+		name=$$(basename $$component) ; \
+		depth=$$(echo $$component | tr '/' '\n' | wc -l) ; \
+		if [ $$depth -eq 1 ]; then \
+			outpath="../$(BIN_DIR)/$$name" ; \
+		else \
+			outpath="../../$(BIN_DIR)/$$name" ; \
+		fi ; \
+		(cd $$component && $(GO) build -ldflags "$(LDFLAGS)" -o $$outpath ./...) || exit 1 ; \
 	done
 	@echo "Building OTel Collector with NRDOT processors..."
 	@cd otelcol-builder && make build
@@ -55,11 +62,10 @@ test:
 	@echo "Running tests for all components..."
 	@for component in $(COMPONENTS); do \
 		echo "Testing $$component..." ; \
-		cd $$component && $(GO) test -v -race -coverprofile=coverage.out ./... || exit 1 ; \
-		cd .. ; \
+		(cd $$component && $(GO) test -v -race -coverprofile=coverage.out ./...) || exit 1 ; \
 	done
 	@echo "Running integration tests..."
-	@cd integration-tests && make test
+	@cd tests/integration && make test
 	@echo "All tests passed!"
 
 ## Run linting for all components
@@ -67,8 +73,7 @@ lint:
 	@echo "Running linters..."
 	@for component in $(COMPONENTS); do \
 		echo "Linting $$component..." ; \
-		cd $$component && golangci-lint run || exit 1 ; \
-		cd .. ; \
+		(cd $$component && golangci-lint run) || exit 1 ; \
 	done
 
 ## Generate code (if needed)
@@ -77,8 +82,7 @@ generate:
 	@for component in $(COMPONENTS); do \
 		if [ -f "$$component/generate.go" ]; then \
 			echo "Generating for $$component..." ; \
-			cd $$component && $(GO) generate ./... ; \
-			cd .. ; \
+			(cd $$component && $(GO) generate ./...) ; \
 		fi \
 	done
 
@@ -87,11 +91,11 @@ docker: docker-build
 
 docker-build:
 	@echo "Building Docker images..."
-	@cd docker && make build-all TAG=$(VERSION)
+	@cd deployments/docker && make build-all TAG=$(VERSION)
 
 docker-push:
 	@echo "Pushing Docker images..."
-	@cd docker && make push-all TAG=$(VERSION)
+	@cd deployments/docker && make push-all TAG=$(VERSION)
 
 ## Build unified Docker image (v2.0)
 docker-unified:
@@ -102,7 +106,7 @@ docker-unified:
 		--build-arg GIT_COMMIT=$(COMMIT) \
 		-t nrdot-host:$(VERSION) \
 		-t nrdot-host:latest \
-		-f docker/unified/Dockerfile .
+		-f deployments/docker/unified/Dockerfile .
 	@echo "Unified image built: nrdot-host:$(VERSION)"
 
 ## Build all Docker images including unified
@@ -180,19 +184,15 @@ security-scan:
 	@echo "Running security scans..."
 	@for component in $(COMPONENTS); do \
 		echo "Scanning $$component..." ; \
-		cd $$component && gosec -fmt json -out security-report.json ./... ; \
-		cd .. ; \
+		(cd $$component && gosec -fmt json -out security-report.json ./...) ; \
 	done
-	@cd docker && ./security-scan.sh
+	@cd deployments/docker && ./security-scan.sh
 
 ## Generate documentation
 docs:
 	@echo "Generating documentation..."
-	@for component in $(COMPONENTS); do \
-		echo "Documenting $$component..." ; \
-		cd $$component && godoc -http=:6060 & \
-		cd .. ; \
-	done
+	@godoc -http=:6060 &
+	@echo "Documentation server running at http://localhost:6060"
 
 ## Run benchmarks
 benchmark:
@@ -200,8 +200,7 @@ benchmark:
 	@for component in $(COMPONENTS); do \
 		if ls $$component/*_test.go 2>/dev/null | grep -q bench; then \
 			echo "Benchmarking $$component..." ; \
-			cd $$component && $(GO) test -bench=. -benchmem ./... ; \
-			cd .. ; \
+			(cd $$component && $(GO) test -bench=. -benchmem ./...) ; \
 		fi \
 	done
 
@@ -210,8 +209,7 @@ update-deps:
 	@echo "Updating dependencies..."
 	@for component in $(COMPONENTS); do \
 		echo "Updating $$component dependencies..." ; \
-		cd $$component && $(GO) get -u ./... && $(GO) mod tidy ; \
-		cd .. ; \
+		(cd $$component && $(GO) get -u ./... && $(GO) mod tidy) ; \
 	done
 
 ## Clean build artifacts

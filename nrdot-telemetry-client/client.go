@@ -391,3 +391,8 @@ func (n *noopClient) RecordMetric(name string, value float64, attributes ...attr
 func (n *noopClient) IncrementCounter(name string, attributes ...attribute.KeyValue) error { return nil }
 func (n *noopClient) RecordDuration(name string, duration time.Duration, attributes ...attribute.KeyValue) error { return nil }
 func (n *noopClient) Shutdown(ctx context.Context) error                            { return nil }
+// NewNoOpClient creates a new no-op telemetry client
+func NewNoOpClient() TelemetryClient {
+	return &noopClient{}
+}
+

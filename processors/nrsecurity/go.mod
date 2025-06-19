@@ -1,4 +1,4 @@
-module github.com/newrelic/nrdot-host/otel-processor-nrsecurity
+module github.com/newrelic/nrdot-host/processors/nrsecurity
 
 go 1.21
 

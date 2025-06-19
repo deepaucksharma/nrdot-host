@@ -1,0 +1,188 @@
+version: '3.8'
+
+# Production-ready NRDOT-HOST deployment
+# This configuration includes security hardening, resource limits, and monitoring
+
+services:
+  # NRDOT-HOST with full security and monitoring
+  nrdot-host:
+    image: nrdot-host:${NRDOT_VERSION:-latest}
+    container_name: nrdot-host-prod
+    hostname: ${HOSTNAME:-nrdot-host}
+    restart: always
+    
+    # Security settings
+    security_opt:
+      - no-new-privileges:true
+      - apparmor:nrdot-host  # Requires AppArmor profile
+    cap_add:
+      - SYS_PTRACE      # Process monitoring
+      - DAC_READ_SEARCH # Read protected files
+      - NET_ADMIN       # Network discovery
+    cap_drop:
+      - ALL
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+          
+    # Network configuration
+    networks:
+      - monitoring
+    ports:
+      - "127.0.0.1:8080:8080"  # API (localhost only)
+    
+    # Required for host monitoring
+    pid: host
+    volumes:
+      # Read-only host mounts
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /etc/os-release:/etc/os-release:ro
+      
+      # Configuration (read-only)
+      - ./config/nrdot:/etc/nrdot:ro
+      
+      # Data directories
+      - nrdot_data:/var/lib/nrdot
+      - nrdot_logs:/var/log/nrdot
+      
+      # Container runtime sockets (read-only)
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /run/containerd/containerd.sock:/run/containerd/containerd.sock:ro
+      
+    # Environment configuration
+    env_file:
+      - ./config/nrdot.env  # Secrets file
+    environment:
+      # Service identification
+      - NRDOT_SERVICE_NAME=${HOSTNAME:-nrdot-host}
+      - NRDOT_ENVIRONMENT=production
+      
+      # Configuration
+      - NRDOT_CONFIG_FILE=/etc/nrdot/config.yaml
+      - NRDOT_AUTO_CONFIG=true
+      - NRDOT_SCAN_INTERVAL=5m
+      
+      # Logging
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - LOG_FORMAT=json
+      
+      # Performance
+      - GOMAXPROCS=2
+      - GOMEMLIMIT=1800MiB
+      
+    # Health checks
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/nrdot-host", "status", "--quiet"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+      
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+        compress: "true"
+        labels: "service=nrdot-host,env=production"
+        
+  # Prometheus node exporter for comparison/validation
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    restart: always
+    pid: host
+    network_mode: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+      - '--no-collector.ipvs'
+    deploy:
+      resources:
+        limits:
+          cpus: '0.2'
+          memory: 128M
+          
+  # Log shipper (optional)
+  filebeat:
+    image: elastic/filebeat:8.11.0
+    container_name: filebeat
+    restart: always
+    user: root
+    volumes:
+      - ./config/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - nrdot_logs:/var/log/nrdot:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - ELASTICSEARCH_HOSTS=${ELASTICSEARCH_HOSTS:-elasticsearch:9200}
+      - ELASTICSEARCH_USERNAME=${ELASTICSEARCH_USERNAME:-elastic}
+      - ELASTICSEARCH_PASSWORD=${ELASTICSEARCH_PASSWORD}
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+          
+  # Local monitoring dashboard (optional)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: always
+    networks:
+      - monitoring
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./config/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+      - GF_SECURITY_DISABLE_GRAVATAR=true
+      - GF_USERS_ALLOW_SIGN_UP=false
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+
+volumes:
+  nrdot_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${NRDOT_DATA_PATH:-/opt/nrdot/data}
+  nrdot_logs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${NRDOT_LOGS_PATH:-/opt/nrdot/logs}
+  grafana_data:
+    driver: local
+
+networks:
+  monitoring:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

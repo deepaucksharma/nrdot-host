@@ -2,7 +2,7 @@
 
 ## Reporting Security Vulnerabilities
 
-The NRDOT team takes security seriously. We appreciate your efforts to responsibly disclose your findings.
+The NRDOT-HOST team takes security seriously. We appreciate your efforts to responsibly disclose your findings.
 
 ### Where to Report
 
@@ -12,7 +12,7 @@ Instead, please report them via one of these methods:
 
 1. **Email**: security@newrelic.com
 2. **New Relic Security Portal**: https://newrelic.com/security
-3. **GitHub Security Advisories**: [Report a vulnerability](https://github.com/deepaucksharma/nrdot-host/security/advisories/new)
+3. **GitHub Security Advisories**: [Report a vulnerability](https://github.com/newrelic/nrdot-host/security/advisories/new)
 
 ### What to Include
 
@@ -57,38 +57,54 @@ Automatically detects and redacts:
 
 ### Security Best Practices
 
-#### Installation
+#### Installation (Linux Only)
 ```bash
-# Verify package signatures
-gpg --verify nrdot-host.rpm.sig nrdot-host.rpm
+# Download and verify binary
+curl -L https://github.com/newrelic/nrdot-host/releases/latest/download/nrdot-host-linux-amd64 -o nrdot-host
+curl -L https://github.com/newrelic/nrdot-host/releases/latest/download/checksums.txt -o checksums.txt
+sha256sum -c checksums.txt
 
 # Set secure permissions
-chmod 600 /etc/nrdot/config.yaml
-chown nrdot:nrdot /etc/nrdot/config.yaml
+chmod 755 nrdot-host
+sudo mv nrdot-host /usr/local/bin/
+
+# Secure configuration
+sudo mkdir -p /etc/nrdot
+sudo chmod 600 /etc/nrdot/config.yaml
+sudo chown nrdot:nrdot /etc/nrdot/config.yaml
 ```
 
 #### Configuration
 ```yaml
-# Enable all security features
-security:
-  redact_secrets: true
-  redaction_rules:
-    - pattern: "(?i)api[_-]?key"
-      replacement: "[REDACTED]"
-  
-  # Restrict API access
-  api:
-    bind_address: "127.0.0.1"
-    enable_tls: true
-    tls_cert: "/etc/nrdot/certs/server.crt"
-    tls_key: "/etc/nrdot/certs/server.key"
+# Security is built-in via nrsecurity processor
+processors:
+  nrsecurity:
+    # Automatic secret detection and redaction
+    # No configuration needed - secure by default
+
+# API server security (when implemented)
+# api:
+#   bind_address: "127.0.0.1:8090"  # Local only
+#   auth_enabled: true              # Phase 3
 ```
 
-#### Runtime
-- Run as non-root user
+#### Runtime Security (Linux)
+- Run as dedicated nrdot user
 - Use systemd security features
-- Enable SELinux/AppArmor policies
-- Monitor security logs
+- Privileged helper for elevated operations
+- Monitor logs: `journalctl -u nrdot-host`
+
+#### Systemd Hardening
+```ini
+[Service]
+User=nrdot
+Group=nrdot
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+NoNewPrivileges=true
+ReadWritePaths=/var/lib/nrdot
+```
 
 ### Compliance
 
@@ -111,18 +127,22 @@ NRDOT-HOST helps meet compliance requirements:
 
 ## Security Updates
 
-### Automatic Updates
+### Updates
+
+#### Current Process
 ```bash
-# Enable automatic security updates
-systemctl enable nrdot-updater
+# Check for new releases
+curl -s https://api.github.com/repos/newrelic/nrdot-host/releases/latest | grep tag_name
+
+# Download and install new version
+curl -L https://github.com/newrelic/nrdot-host/releases/latest/download/nrdot-host-linux-amd64 -o nrdot-host
+# Verify and install as above
 ```
 
-### Manual Updates
+#### Future (Phase 3)
 ```bash
-# Check for updates
-nrdot-ctl check-updates
-
-# Apply updates
+# Package manager updates
+sudo apt update && sudo apt upgrade nrdot-host
 sudo yum update nrdot-host
 ```
 
@@ -149,54 +169,54 @@ Subscribe to security updates:
 - [ ] Review access logs
 - [ ] Incident response plan
 
-## Hardening Guide
+## Linux Hardening Guide
 
-### Linux
+### System Setup
 ```bash
 # Create dedicated user
-useradd -r -s /bin/false nrdot
+sudo useradd -r -s /bin/false nrdot
 
 # Set up directories
-mkdir -p /etc/nrdot /var/lib/nrdot /var/log/nrdot
-chown -R nrdot:nrdot /etc/nrdot /var/lib/nrdot /var/log/nrdot
-chmod 750 /etc/nrdot /var/lib/nrdot
-chmod 755 /var/log/nrdot
+sudo mkdir -p /etc/nrdot /var/lib/nrdot
+sudo chown -R nrdot:nrdot /etc/nrdot /var/lib/nrdot
+sudo chmod 750 /etc/nrdot /var/lib/nrdot
 
-# SELinux context
-semanage fcontext -a -t nrdot_conf_t '/etc/nrdot(/.*)?'
-restorecon -Rv /etc/nrdot
+# Privileged helper (for process monitoring)
+sudo chown root:nrdot /usr/local/bin/nrdot-privileged-helper
+sudo chmod 4750 /usr/local/bin/nrdot-privileged-helper
 ```
 
-### Container
+### SELinux (Optional)
+```bash
+# Create custom policy for NRDOT-HOST
+ausearch -c 'nrdot-host' --raw | audit2allow -M nrdot-host
+semodule -i nrdot-host.pp
+```
+
+### Container Security
 ```dockerfile
-# Run as non-root
-USER nrdot:nrdot
+# Minimal Linux base
+FROM alpine:latest
 
-# Read-only filesystem
-RUN chmod -R a-w /app
+# Non-root user
+RUN adduser -D -H -s /sbin/nologin nrdot
+USER nrdot
 
-# No new privileges
-RUN setcap -r /app/nrdot-collector
+# Read-only root filesystem
+WORKDIR /app
+COPY --chown=nrdot:nrdot nrdot-host /app/
 ```
 
-### Kubernetes
-```yaml
-securityContext:
-  runAsNonRoot: true
-  runAsUser: 1000
-  fsGroup: 1000
-  seccompProfile:
-    type: RuntimeDefault
-  capabilities:
-    drop:
-    - ALL
+**Note**: Container deployments require host PID namespace for process monitoring:
+```bash
+docker run --pid=host --network=host -v /proc:/host/proc:ro nrdot-host
 ```
 
 ## Contact
 
 For security questions not related to vulnerabilities:
 - Documentation: [Security Guide](./docs/security.md)
-- Community: [Discussions](https://github.com/deepaucksharma/nrdot-host/discussions)
+- Community: GitHub Issues
 
 ---
 

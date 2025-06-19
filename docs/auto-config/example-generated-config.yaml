@@ -1,0 +1,450 @@
+# Example Auto-Generated Configuration
+# This file shows what the auto-configuration engine produces
+# when it discovers MySQL, PostgreSQL, and Nginx on a host
+
+# Auto-generated at: 2024-01-15T10:31:00Z
+# Config version: 2024-01-15-001
+# Discovered services: mysql, postgresql, nginx
+
+receivers:
+  # Base host metrics (always included)
+  hostmetrics:
+    collection_interval: 60s
+    scrapers:
+      cpu:
+        metrics:
+          system.cpu.utilization:
+            enabled: true
+          system.cpu.load_average.1m:
+            enabled: true
+          system.cpu.load_average.5m:
+            enabled: true
+          system.cpu.load_average.15m:
+            enabled: true
+      
+      memory:
+        metrics:
+          system.memory.utilization:
+            enabled: true
+          system.memory.usage:
+            enabled: true
+            attributes:
+              state: ["used", "free", "cached", "buffered"]
+      
+      disk:
+        metrics:
+          system.disk.operations:
+            enabled: true
+          system.disk.io:
+            enabled: true
+          system.disk.merged:
+            enabled: true
+          system.disk.time:
+            enabled: true
+      
+      filesystem:
+        metrics:
+          system.filesystem.utilization:
+            enabled: true
+          system.filesystem.usage:
+            enabled: true
+        match_type: strict
+        mount_points: ["/", "/var", "/tmp"]
+      
+      network:
+        metrics:
+          system.network.packets:
+            enabled: true
+          system.network.errors:
+            enabled: true
+          system.network.io:
+            enabled: true
+          system.network.connections:
+            enabled: true
+      
+      load:
+        metrics:
+          system.cpu.load_average.1m:
+            enabled: true
+      
+      processes:
+        metrics:
+          system.processes.running:
+            enabled: true
+          system.processes.blocked:
+            enabled: true
+          system.processes.count:
+            enabled: true
+  
+  # Auto-discovered: MySQL on localhost:3306
+  mysql:
+    endpoint: localhost:3306
+    collection_interval: 30s
+    username: ${MYSQL_MONITOR_USER}
+    password: ${MYSQL_MONITOR_PASS}
+    
+    # New Relic recommended metrics
+    metrics:
+      # Buffer pool metrics
+      mysql.buffer_pool_pages:
+        enabled: true
+      mysql.buffer_pool_data_pages:
+        enabled: true
+      mysql.buffer_pool_page_changes:
+        enabled: true
+      mysql.buffer_pool_limit:
+        enabled: true
+      mysql.buffer_pool_operations:
+        enabled: true
+      
+      # Connection metrics
+      mysql.connection.count:
+        enabled: true
+      mysql.connection.errors:
+        enabled: true
+      
+      # Query performance
+      mysql.statement.latency.count:
+        enabled: true
+      mysql.statement.latency.time:
+        enabled: true
+      mysql.slow_queries:
+        enabled: true
+      mysql.questions:
+        enabled: true
+      
+      # InnoDB metrics
+      mysql.innodb_buffer_pool_pages:
+        enabled: true
+      mysql.innodb_buffer_pool_bytes_data:
+        enabled: true
+      mysql.innodb_buffer_pool_bytes_dirty:
+        enabled: true
+      mysql.innodb_data_reads:
+        enabled: true
+      mysql.innodb_data_writes:
+        enabled: true
+      
+      # Replication metrics (if applicable)
+      mysql.replica.lag:
+        enabled: true
+      mysql.replica.sql_delay:
+        enabled: true
+  
+  # MySQL logs
+  filelog/mysql_error:
+    include:
+      - /var/log/mysql/error.log
+    start_at: end
+    include_file_path: true
+    operators:
+      - type: regex_parser
+        regex: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z\s+(?P<severity>\w+)\s+(?P<message>.*)'
+      - type: severity_parser
+        parse_from: attributes.severity
+    resource:
+      service.name: mysql
+      log.type: error
+  
+  filelog/mysql_slow:
+    include:
+      - /var/log/mysql/slow.log
+    start_at: end
+    multiline:
+      line_start_pattern: '^# Time:'
+    operators:
+      - type: regex_parser
+        regex: '^# Query_time: (?P<query_time>[\d.]+)\s+Lock_time: (?P<lock_time>[\d.]+)'
+    resource:
+      service.name: mysql
+      log.type: slow_query
+  
+  # Auto-discovered: PostgreSQL on localhost:5432
+  postgresql:
+    endpoint: localhost:5432
+    collection_interval: 30s
+    username: ${POSTGRES_MONITOR_USER}
+    password: ${POSTGRES_MONITOR_PASS}
+    databases:
+      - ${POSTGRES_MONITOR_DB:postgres}
+    
+    metrics:
+      # Database metrics
+      postgresql.database.count:
+        enabled: true
+      postgresql.db_size:
+        enabled: true
+      postgresql.backends:
+        enabled: true
+      postgresql.connection.max:
+        enabled: true
+      
+      # Table metrics
+      postgresql.table.count:
+        enabled: true
+      postgresql.table.size:
+        enabled: true
+      postgresql.table.vacuum.count:
+        enabled: true
+      
+      # Query metrics
+      postgresql.operations:
+        enabled: true
+      postgresql.blocks_read:
+        enabled: true
+      postgresql.blocks_hit:
+        enabled: true
+      postgresql.temp_files:
+        enabled: true
+      
+      # Replication metrics
+      postgresql.replication.lag:
+        enabled: true
+      postgresql.wal.delay:
+        enabled: true
+  
+  # PostgreSQL logs
+  filelog/postgresql:
+    include:
+      - /var/log/postgresql/postgresql-*.log
+    start_at: end
+    operators:
+      - type: regex_parser
+        regex: '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}.*?\[(?P<level>\w+)\]'
+      - type: severity_parser
+        parse_from: attributes.level
+        mapping:
+          error: ["ERROR", "FATAL", "PANIC"]
+          warn: ["WARNING"]
+          info: ["INFO", "NOTICE"]
+          debug: ["DEBUG"]
+    resource:
+      service.name: postgresql
+  
+  # Auto-discovered: Nginx on :80 and :443
+  nginx:
+    endpoint: "http://localhost:80/nginx_status"
+    collection_interval: 30s
+    
+    # Nginx stub_status metrics
+    metrics:
+      nginx.connections_accepted:
+        enabled: true
+      nginx.connections_handled:
+        enabled: true
+      nginx.connections_current:
+        enabled: true
+      nginx.connections_reading:
+        enabled: true
+      nginx.connections_writing:
+        enabled: true
+      nginx.connections_waiting:
+        enabled: true
+      nginx.requests:
+        enabled: true
+  
+  # Nginx logs
+  filelog/nginx_access:
+    include:
+      - /var/log/nginx/access.log
+    start_at: end
+    operators:
+      - type: regex_parser
+        regex: '^(?P<remote_addr>\S+) - (?P<remote_user>\S+) \[(?P<time_local>[^\]]+)\] "(?P<request>[^"]+)" (?P<status>\d+) (?P<bytes_sent>\d+)'
+      - type: time_parser
+        parse_from: attributes.time_local
+        layout: '%d/%b/%Y:%H:%M:%S %z'
+    resource:
+      service.name: nginx
+      log.type: access
+  
+  filelog/nginx_error:
+    include:
+      - /var/log/nginx/error.log
+    start_at: end
+    operators:
+      - type: regex_parser
+        regex: '^\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2} \[(?P<level>\w+)\]'
+      - type: severity_parser
+        parse_from: attributes.level
+    resource:
+      service.name: nginx
+      log.type: error
+  
+  # System logs (always included)
+  filelog/system:
+    include:
+      - /var/log/syslog
+      - /var/log/messages
+    exclude:
+      - /var/log/syslog.*.gz
+    start_at: end
+    operators:
+      - type: syslog_parser
+        protocol: rfc3164
+    resource:
+      log.type: system
+
+processors:
+  # Security processor - MUST be first
+  nrsecurity:
+    # Automatic secret redaction
+    # No configuration needed - detects and redacts:
+    # - Passwords and API keys
+    # - Credit card numbers
+    # - Social security numbers
+    # - Connection strings
+    # - Private keys
+  
+  # Host enrichment
+  nrenrich:
+    host_metadata: true       # Add host.name, host.id
+    cloud_detection: true     # Detect AWS/GCP/Azure
+    service_detection: true   # Add service.name where missing
+    
+  # Add discovered services as attributes
+  attributes/services:
+    actions:
+      - key: discovered.services
+        value: "mysql,postgresql,nginx"
+        action: insert
+      - key: autoconfig.version
+        value: "2024-01-15-001"
+        action: insert
+  
+  # Resource processor for common attributes
+  resource:
+    attributes:
+      - key: service.name
+        value: ${HOSTNAME}
+        action: insert
+      - key: service.environment
+        value: ${ENVIRONMENT:production}
+        action: insert
+      - key: service.version
+        value: "2.0.0"
+        action: insert
+      - key: telemetry.sdk.language
+        value: "go"
+        action: insert
+      - key: telemetry.sdk.name
+        value: "opentelemetry"
+        action: insert
+  
+  # Performance optimization
+  batch:
+    timeout: 10s
+    send_batch_size: 1000
+    send_batch_max_size: 1500
+  
+  # Memory limiting to prevent OOM
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+    
+  # Sampling for high-volume logs (if needed)
+  probabilistic_sampler:
+    sampling_percentage: 100  # No sampling by default
+
+exporters:
+  # New Relic OTLP endpoint
+  otlp/newrelic:
+    endpoint: otlp.nr-data.net:4317
+    headers:
+      api-key: ${NEW_RELIC_LICENSE_KEY}
+    compression: gzip
+    sending_queue:
+      enabled: true
+      num_consumers: 4
+      queue_size: 1000
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+    timeout: 30s
+  
+  # Local debug exporter (disabled in production)
+  # debug:
+  #   verbosity: detailed
+  #   sampling_initial: 10
+  #   sampling_thereafter: 100
+
+service:
+  # Telemetry for the collector itself
+  telemetry:
+    logs:
+      level: ${LOG_LEVEL:info}
+      encoding: json
+      output_paths: ["stdout", "/var/log/nrdot/collector.log"]
+    metrics:
+      level: detailed
+      address: 127.0.0.1:8888
+  
+  # Extensions
+  extensions: [health_check, zpages]
+  
+  # Pipeline definitions
+  pipelines:
+    # Metrics pipeline
+    metrics:
+      receivers:
+        - hostmetrics
+        - mysql
+        - postgresql
+        - nginx
+      processors:
+        - nrenrich
+        - attributes/services
+        - resource
+        - batch
+        - memory_limiter
+      exporters:
+        - otlp/newrelic
+    
+    # Logs pipeline
+    logs:
+      receivers:
+        - filelog/mysql_error
+        - filelog/mysql_slow
+        - filelog/postgresql
+        - filelog/nginx_access
+        - filelog/nginx_error
+        - filelog/system
+      processors:
+        - nrsecurity      # Must be first for redaction
+        - nrenrich
+        - attributes/services
+        - resource
+        - batch
+        - memory_limiter
+      exporters:
+        - otlp/newrelic
+
+extensions:
+  # Health check endpoint
+  health_check:
+    endpoint: 127.0.0.1:13133
+    path: /health
+    
+  # zPages for debugging
+  zpages:
+    endpoint: 127.0.0.1:55679
+
+# Configuration metadata (added by auto-config engine)
+# DO NOT EDIT - This section is auto-generated
+# 
+# Generated: 2024-01-15T10:31:00Z
+# Version: 2024-01-15-001
+# Source: Auto-configuration engine v2.0
+# Signature: MEUCIQD1x2... (truncated)
+#
+# Discovered services:
+#   - mysql (8.0.32) on localhost:3306
+#   - postgresql (14.5) on localhost:5432
+#   - nginx (1.22.1) on :80,:443
+#
+# Discovery confidence: HIGH (process + port + config)
+# Template version: 1.0
+# Next scan: 2024-01-15T10:36:00Z

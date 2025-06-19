@@ -1,0 +1,209 @@
+# NRDOT-HOST Configuration Template
+# This template shows all available configuration options
+
+# Service metadata
+service:
+  name: ${HOSTNAME}                    # Default: system hostname
+  environment: ${ENVIRONMENT}          # e.g., production, staging
+  version: ${VERSION}                  # Optional: app version
+
+# New Relic license key (required)
+license_key: ${NEW_RELIC_LICENSE_KEY}
+
+# Custom attributes/labels
+labels:
+  team: ${TEAM}
+  datacenter: ${DATACENTER}
+  role: ${ROLE}
+  # Add any custom key-value pairs
+
+# Future: Auto-configuration (Phase 2)
+# auto_config:
+#   enabled: true                      # Enable service discovery
+#   scan_interval: 5m                  # How often to scan
+#   exclude_services:                  # Services to skip
+#     - redis
+#   service_overrides:                 # Override auto-detected settings
+#     mysql:
+#       collection_interval: 60s
+
+# OpenTelemetry Collector Configuration
+# Most users won't need to modify this section
+
+receivers:
+  # Host metrics (always enabled)
+  hostmetrics:
+    collection_interval: 60s
+    scrapers:
+      cpu:
+        metrics:
+          system.cpu.utilization:
+            enabled: true
+      memory:
+        metrics:
+          system.memory.utilization:
+            enabled: true
+      disk:
+        metrics:
+          system.disk.operations:
+            enabled: true
+      network:
+        metrics:
+          system.network.packets:
+            enabled: true
+      load:
+        metrics:
+          system.cpu.load_average.1m:
+            enabled: true
+      filesystem:
+        metrics:
+          system.filesystem.utilization:
+            enabled: true
+      processes:
+        metrics:
+          system.processes.count:
+            enabled: true
+  
+  # System logs
+  filelog/system:
+    include:
+      - /var/log/syslog
+      - /var/log/messages
+      - /var/log/secure
+      - /var/log/auth.log
+    start_at: end
+    
+  # OTLP receiver for application telemetry
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 127.0.0.1:4317
+      http:
+        endpoint: 127.0.0.1:4318
+
+  # Example: Manual MySQL configuration (until auto-config)
+  # mysql:
+  #   endpoint: localhost:3306
+  #   username: ${MYSQL_USER}
+  #   password: ${MYSQL_PASSWORD}
+  #   collection_interval: 60s
+  #   metrics:
+  #     mysql.locks:
+  #       enabled: true
+  #     mysql.questions:
+  #       enabled: true
+
+processors:
+  # Security processor (automatic secret redaction)
+  nrsecurity:
+    # Automatically configured, no settings needed
+  
+  # Enrichment processor (adds host metadata)
+  nrenrich:
+    host_metadata: true
+    cloud_detection: true
+    
+  # Resource processor (adds labels)
+  resource:
+    attributes:
+      - key: service.name
+        value: ${service:name}
+        action: upsert
+      - key: service.environment
+        value: ${service:environment}
+        action: upsert
+  
+  # Batch processor (improves performance)
+  batch:
+    timeout: 10s
+    send_batch_size: 1000
+
+exporters:
+  # New Relic OTLP endpoint
+  otlp/newrelic:
+    endpoint: ${NEW_RELIC_OTLP_ENDPOINT:otlp.nr-data.net:4317}
+    headers:
+      api-key: ${license_key}
+    compression: gzip
+    
+  # Debug exporter (optional, for troubleshooting)
+  # debug:
+  #   verbosity: detailed
+  #   sampling_initial: 10
+  #   sampling_thereafter: 100
+
+# Pipeline configuration
+service:
+  pipelines:
+    # Metrics pipeline
+    metrics:
+      receivers:
+        - hostmetrics
+        - otlp
+        # Add service receivers here when configured
+      processors:
+        - nrenrich
+        - resource
+        - batch
+      exporters:
+        - otlp/newrelic
+        
+    # Logs pipeline
+    logs:
+      receivers:
+        - filelog/system
+        - otlp
+      processors:
+        - nrsecurity  # Must be first for redaction
+        - nrenrich
+        - resource
+        - batch
+      exporters:
+        - otlp/newrelic
+        
+    # Traces pipeline
+    traces:
+      receivers:
+        - otlp
+      processors:
+        - nrsecurity
+        - nrenrich
+        - resource
+        - batch
+      exporters:
+        - otlp/newrelic
+
+  # Telemetry for the collector itself
+  telemetry:
+    logs:
+      level: ${LOG_LEVEL:info}
+      encoding: json
+    metrics:
+      level: detailed
+      address: 127.0.0.1:8888
+
+# Extensions
+extensions:
+  # Health check endpoint
+  health_check:
+    endpoint: 127.0.0.1:13133
+    
+  # Performance profiler (optional)
+  # pprof:
+  #   endpoint: 127.0.0.1:1777
+
+# Network configuration
+# http_proxy: ${HTTP_PROXY}
+# https_proxy: ${HTTPS_PROXY}
+# no_proxy: ${NO_PROXY}
+
+# Advanced settings (rarely needed)
+# api:
+#   bind_address: 127.0.0.1:8090      # API server address
+#   auth_enabled: false               # Coming in Phase 3
+
+# Supervisor settings
+# supervisor:
+#   restart_delay: 5s                 # Delay between restarts
+#   max_restarts: 10                  # Max restart attempts
+#   health_check_interval: 30s        # Health check frequency

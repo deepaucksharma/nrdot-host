@@ -3,6 +3,10 @@ module github.com/newrelic/nrdot-host/nrdot-supervisor
 go 1.21
 
 require (
+	github.com/gorilla/mux v1.8.1
+	github.com/newrelic/nrdot-host/nrdot-api-server v0.0.0-00010101000000-000000000000
+	github.com/newrelic/nrdot-host/nrdot-common v0.0.0-00010101000000-000000000000
+	github.com/newrelic/nrdot-host/nrdot-config-engine v0.0.0-00010101000000-000000000000
 	github.com/newrelic/nrdot-host/nrdot-telemetry-client v0.0.0-00010101000000-000000000000
 	github.com/spf13/pflag v1.0.5
 	go.uber.org/zap v1.27.0
@@ -32,4 +36,11 @@ require (
 	google.golang.org/protobuf v1.32.0 // indirect
 )
 
-replace github.com/newrelic/nrdot-host/nrdot-telemetry-client => ../nrdot-telemetry-client
+replace (
+	github.com/newrelic/nrdot-host/nrdot-api-server => ../nrdot-api-server
+	github.com/newrelic/nrdot-host/nrdot-common => ../nrdot-common
+	github.com/newrelic/nrdot-host/nrdot-config-engine => ../nrdot-config-engine
+	github.com/newrelic/nrdot-host/nrdot-schema => ../nrdot-schema
+	github.com/newrelic/nrdot-host/nrdot-telemetry-client => ../nrdot-telemetry-client
+	github.com/newrelic/nrdot-host/nrdot-template-lib => ../nrdot-template-lib
+)

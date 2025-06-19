@@ -381,6 +381,84 @@ Get throughput metrics.
 }
 ```
 
+### Auto-Configuration (Phase 2 - Coming Soon)
+
+#### GET /v1/discovery
+
+Run service discovery scan.
+
+**Response:**
+```json
+{
+  "discovery_id": "550e8400-e29b-41d4-a716-446655440000",
+  "timestamp": "2024-01-15T10:30:00Z",
+  "discovered_services": [
+    {
+      "type": "mysql",
+      "version": "8.0.32",
+      "endpoints": [{"address": "localhost", "port": 3306}],
+      "confidence": "HIGH",
+      "discovered_by": ["process", "port", "config_file"]
+    },
+    {
+      "type": "nginx",
+      "version": "1.22.1",
+      "endpoints": [{"address": "0.0.0.0", "port": 80}],
+      "confidence": "HIGH",
+      "discovered_by": ["process", "port"]
+    }
+  ],
+  "scan_duration_ms": 450,
+  "errors": []
+}
+```
+
+#### GET /v1/discovery/status
+
+Get auto-configuration status.
+
+**Response:**
+```json
+{
+  "enabled": true,
+  "last_scan": "2024-01-15T10:30:00Z",
+  "next_scan": "2024-01-15T10:35:00Z",
+  "active_services": ["mysql", "nginx"],
+  "config_version": "2024-01-15-001",
+  "config_source": "remote"
+}
+```
+
+#### POST /v1/discovery/preview
+
+Preview what configuration would be generated.
+
+**Request:**
+```json
+{
+  "services": ["mysql", "nginx"]
+}
+```
+
+**Response:**
+```json
+{
+  "preview": {
+    "receivers": {
+      "mysql": {...},
+      "nginx": {...}
+    },
+    "pipelines": {
+      "metrics": {
+        "receivers": ["mysql", "nginx", "hostmetrics"]
+      }
+    }
+  },
+  "template_version": "1.0",
+  "variables_required": ["MYSQL_MONITOR_USER", "MYSQL_MONITOR_PASS"]
+}
+```
+
 ### Control
 
 #### POST /v1/control/restart

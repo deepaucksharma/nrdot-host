@@ -1,0 +1,152 @@
+# NRDOT-HOST Docker Configuration
+# This configuration is optimized for containerized environments
+
+# License key - set via NEW_RELIC_LICENSE_KEY environment variable
+license_key: "${NEW_RELIC_LICENSE_KEY}"
+
+# Service identification
+service:
+  name: "${HOSTNAME}"
+  environment: "${NRDOT_ENVIRONMENT:production}"
+
+# Auto-configuration for container environments
+auto_config:
+  enabled: true
+  scan_interval: 5m
+  # Exclude services that are typically external in containers
+  exclude_services: []
+
+# Data directory (volume mount)
+data_dir: /var/lib/nrdot
+
+# Logging configuration
+logging:
+  level: "${LOG_LEVEL:info}"
+  # Log to stdout for container logs
+  file: ""
+  format: json
+
+# API Server
+api:
+  enabled: true
+  # Bind to all interfaces in container
+  listen_addr: "0.0.0.0:8080"
+
+# Telemetry settings
+telemetry:
+  enabled: true
+  endpoint: "${TELEMETRY_ENDPOINT:otlp.nr-data.net:4317}"
+
+# Process monitoring
+processes:
+  enabled: true
+  top_n: 20
+  interval: 30s
+
+# Host metrics collection
+receivers:
+  hostmetrics:
+    collection_interval: 30s
+    scrapers:
+      cpu:
+        metrics:
+          system.cpu.utilization:
+            enabled: true
+      memory:
+        metrics:
+          system.memory.utilization:
+            enabled: true
+      disk:
+        # Skip disk metrics in containers
+        enabled: false
+      filesystem:
+        metrics:
+          system.filesystem.utilization:
+            enabled: true
+        # Only monitor container filesystems
+        mount_points: ["/", "/data", "/var/lib"]
+      network:
+        metrics:
+          system.network.io:
+            enabled: true
+      load:
+        metrics:
+          system.cpu.load_average.1m:
+            enabled: true
+
+# OTLP receiver for traces/metrics from other containers
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+# Processors
+processors:
+  # Security - always first
+  nrsecurity:
+    enabled: true
+    
+  # Add container metadata
+  nrenrich:
+    host_metadata: true
+    cloud_detection: true
+    container_detection: true
+    
+  # Resource processor
+  resource:
+    attributes:
+      - key: container.name
+        value: "${HOSTNAME}"
+        action: upsert
+      - key: deployment.environment
+        value: "${NRDOT_ENVIRONMENT:production}"
+        action: upsert
+        
+  # Batch for efficiency
+  batch:
+    timeout: 10s
+    send_batch_size: 1000
+    
+  # Memory limiter for container environments
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+# Exporters
+exporters:
+  otlp/newrelic:
+    endpoint: "${OTLP_ENDPOINT:otlp.nr-data.net:4317}"
+    headers:
+      api-key: "${NEW_RELIC_LICENSE_KEY}"
+    compression: gzip
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+
+# Service pipelines
+service:
+  telemetry:
+    logs:
+      level: "${LOG_LEVEL:info}"
+      encoding: json
+      
+  pipelines:
+    metrics:
+      receivers: [hostmetrics, otlp]
+      processors: [nrsecurity, nrenrich, resource, batch, memory_limiter]
+      exporters: [otlp/newrelic]
+      
+    traces:
+      receivers: [otlp]
+      processors: [nrsecurity, nrenrich, resource, batch, memory_limiter]
+      exporters: [otlp/newrelic]
+      
+    logs:
+      receivers: [otlp]
+      processors: [nrsecurity, nrenrich, resource, batch, memory_limiter]
+      exporters: [otlp/newrelic]

@@ -1,4 +1,4 @@
-module github.com/newrelic/nrdot-host/otel-processor-nrenrich
+module github.com/newrelic/nrdot-host/processors/nrenrich
 
 go 1.21
 

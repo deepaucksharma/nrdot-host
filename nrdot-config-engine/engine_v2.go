@@ -18,6 +18,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// versionRecord stores both the version metadata and the actual config
+type versionRecord struct {
+	Version    models.ConfigVersion
+	UserConfig string
+}
+
 // EngineV2 is the unified configuration engine that consolidates
 // schema validation, template generation, and config management
 type EngineV2 struct {
@@ -26,10 +32,12 @@ type EngineV2 struct {
 	generator     *templates.Generator
 	hookManager   *hooks.Manager
 	
-	mu            sync.RWMutex
-	versions      []models.ConfigVersion
-	currentConfig *models.Config
-	currentOTel   string
+	mu             sync.RWMutex
+	versions       []models.ConfigVersion
+	versionMap     map[int]*versionRecord
+	currentVersion int
+	currentConfig  *models.Config
+	currentOTel    string
 	
 	// Options
 	maxVersions   int
@@ -62,6 +70,7 @@ func NewEngineV2(cfg ConfigV2) (*EngineV2, error) {
 		generator:    generator,
 		hookManager:  hooks.NewManager(),
 		versions:     make([]models.ConfigVersion, 0),
+		versionMap:   make(map[int]*versionRecord),
 		maxVersions:  cfg.MaxVersions,
 		enableBackup: cfg.EnableBackup,
 	}, nil
@@ -123,7 +132,7 @@ func (e *EngineV2) ApplyConfig(ctx context.Context, update *models.ConfigUpdate)
 
 	// Validate the configuration
 	validationResult := &models.ValidationResult{Valid: true}
-	config, err := e.validateUserConfig(update.Config, update.Format)
+	_, err := e.validateUserConfig(update.Config, update.Format)
 	if err != nil {
 		validationResult.Valid = false
 		validationResult.Errors = []models.ValidationError{
@@ -170,7 +179,7 @@ func (e *EngineV2) ApplyConfig(ctx context.Context, update *models.ConfigUpdate)
 
 	// Create new version
 	e.mu.Lock()
-	newVersion := len(e.versions) + 1
+	newVersion := e.currentVersion + 1
 	configVersion := models.ConfigVersion{
 		Version:     newVersion,
 		AppliedAt:   time.Now(),
@@ -182,19 +191,29 @@ func (e *EngineV2) ApplyConfig(ctx context.Context, update *models.ConfigUpdate)
 		Metadata:    update.Metadata,
 	}
 	
+	// Create version record with config
+	record := &versionRecord{
+		Version:    configVersion,
+		UserConfig: string(update.Config),
+	}
+	
 	// Add to version history
 	e.versions = append(e.versions, configVersion)
+	e.versionMap[newVersion] = record
+	e.currentVersion = newVersion
 	
 	// Trim old versions if needed
 	if len(e.versions) > e.maxVersions {
-		e.versions = e.versions[len(e.versions)-e.maxVersions:]
+		oldVersion := e.versions[0]
+		delete(e.versionMap, oldVersion.Version)
+		e.versions = e.versions[1:]
 	}
 	e.mu.Unlock()
 
 	// Notify hooks
 	event := hooks.ConfigChangeEvent{
-		OldVersion: newVersion - 1,
-		NewVersion: newVersion,
+		OldVersion: fmt.Sprintf("%d", newVersion-1),
+		NewVersion: fmt.Sprintf("%d", newVersion),
 		GeneratedConfigs: []string{
 			fmt.Sprintf("version-%d.yaml", newVersion),
 		},
@@ -343,6 +362,105 @@ func (e *EngineV2) calculateHash(content string) string {
 // GetCapabilities returns the provider capabilities
 func (e *EngineV2) GetCapabilities() []string {
 	return []string{"ConfigProvider", "ConfigCommander"}
+}
+
+// DiffConfigs compares two configuration versions
+func (e *EngineV2) DiffConfigs(ctx context.Context, oldVersion, newVersion int) (*models.ConfigDiff, error) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	// Check if versions exist
+	ver1, exists1 := e.versionMap[oldVersion]
+	ver2, exists2 := e.versionMap[newVersion]
+	
+	if !exists1 {
+		return nil, fmt.Errorf("old version not found: %d", oldVersion)
+	}
+	if !exists2 {
+		return nil, fmt.Errorf("new version not found: %d", newVersion)
+	}
+
+	// Create diff result
+	diff := &models.ConfigDiff{
+		OldVersion: oldVersion,
+		NewVersion: newVersion,
+		Added:      []string{},
+		Removed:    []string{},
+		Modified:   []string{},
+	}
+
+	// Simple comparison - just check if config changed
+	if ver1.UserConfig != ver2.UserConfig {
+		diff.Modified = append(diff.Modified, "configuration")
+		diff.Summary = fmt.Sprintf("Configuration changed from version %d to %d", oldVersion, newVersion)
+	} else {
+		diff.Summary = "No changes detected"
+	}
+
+	return diff, nil
+}
+
+// ExportConfig exports the current configuration
+func (e *EngineV2) ExportConfig(ctx context.Context, format string) ([]byte, error) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	// Get current version
+	if e.currentVersion == 0 {
+		return nil, fmt.Errorf("no configuration available")
+	}
+
+	ver, exists := e.versionMap[e.currentVersion]
+	if !exists {
+		return nil, fmt.Errorf("current version not found: %d", e.currentVersion)
+	}
+
+	// Return the user config in requested format
+	// For now, we just return the raw config as it's already in YAML
+	if format != "yaml" && format != "" {
+		return nil, fmt.Errorf("unsupported export format: %s", format)
+	}
+
+	return []byte(ver.UserConfig), nil
+}
+
+// GenerateConfig creates an OTel config from user config
+func (e *EngineV2) GenerateConfig(ctx context.Context, userConfig []byte) (*models.GeneratedConfig, error) {
+	return e.ProcessUserConfig(ctx, userConfig)
+}
+
+// ImportConfig imports a configuration from external source
+func (e *EngineV2) ImportConfig(ctx context.Context, source string, data []byte) (*models.ConfigResult, error) {
+	// Create a config update request
+	update := &models.ConfigUpdate{
+		Config: data,
+		Format: "yaml",
+		Source: source,
+		DryRun: false,
+	}
+
+	// Apply the configuration
+	return e.ApplyConfig(ctx, update)
+}
+
+// GetVersionHistory returns the configuration version history
+func (e *EngineV2) GetVersionHistory(ctx context.Context, limit int) ([]*models.ConfigVersion, error) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	// Return up to limit versions
+	versions := make([]*models.ConfigVersion, 0, limit)
+	start := len(e.versions) - limit
+	if start < 0 {
+		start = 0
+	}
+
+	for i := start; i < len(e.versions); i++ {
+		v := e.versions[i]
+		versions = append(versions, &v)
+	}
+
+	return versions, nil
 }
 
 // Ensure EngineV2 implements the interfaces

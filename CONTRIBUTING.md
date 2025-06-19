@@ -1,6 +1,6 @@
 # Contributing to NRDOT-HOST
 
-Thank you for your interest in contributing to NRDOT-HOST! This document provides guidelines and instructions for contributing.
+Thank you for your interest in contributing to NRDOT-HOST, New Relic's next-generation Linux telemetry collector! This document provides guidelines for contributing to the project.
 
 ## Code of Conduct
 
@@ -13,19 +13,19 @@ This project adheres to a Code of Conduct. By participating, you are expected to
 - Check existing issues before creating a new one
 - Use issue templates when available
 - Include relevant information:
-  - NRDOT version
-  - Operating system
+  - NRDOT-HOST version (`nrdot-host --version`)
+  - Linux distribution and version
   - Steps to reproduce
   - Expected vs actual behavior
-  - Logs and error messages
+  - Logs (`journalctl -u nrdot-host`)
 
 ### Submitting Pull Requests
 
 1. **Fork the Repository**
    ```bash
-   git clone https://github.com/deepaucksharma/nrdot-host.git
+   git clone https://github.com/newrelic/nrdot-host.git
    cd nrdot-host
-   git remote add upstream https://github.com/deepaucksharma/nrdot-host.git
+   git remote add upstream https://github.com/newrelic/nrdot-host.git
    ```
 
 2. **Create a Branch**
@@ -68,22 +68,28 @@ This project adheres to a Code of Conduct. By participating, you are expected to
 
 ### Code Standards
 
-1. **Go Code**
+1. **Linux-Only Focus**
+   - All new code must be Linux-specific
+   - No Windows or macOS code will be accepted
+   - Use build tags for Linux-specific files: `//go:build linux`
+   - Remove cross-platform abstractions
+
+2. **Go Code**
    - Follow [Effective Go](https://golang.org/doc/effective_go.html)
    - Use `gofmt` for formatting
    - Run `golangci-lint` before committing
    - Maintain 80%+ test coverage
 
-2. **Documentation**
+3. **Documentation**
    - Document all exported functions and types
    - Include examples in documentation
-   - Update README.md for user-facing changes
+   - Update relevant docs in `/docs` directory
 
-3. **Testing**
+4. **Testing**
    - Write unit tests for all new code
    - Use table-driven tests where appropriate
    - Mock external dependencies
-   - Test error cases
+   - Test on multiple Linux distributions
 
 ### Project Structure
 
@@ -96,19 +102,22 @@ component-name/
 └── README.md      # Component documentation
 ```
 
-### Building Components
+### Building
 
 ```bash
-# Build a specific component
-cd nrdot-ctl
-go build -o bin/nrdot-ctl ./cmd/nrdot-ctl
+# Build unified binary (Linux only)
+cd cmd/nrdot-host
+make build
 
 # Build all components
 make all
 
-# Build with specific flags
-make build-nrdot-ctl GOFLAGS="-v"
+# Build for specific Linux architectures
+make build-linux-amd64
+make build-linux-arm64
 ```
+
+**Note**: Cross-platform builds are being removed. Only Linux targets are supported.
 
 ### Testing
 
@@ -126,27 +135,45 @@ make test-integration
 make test-e2e
 ```
 
-## Component-Specific Guidelines
+## Development Areas
+
+### Priority Areas for Contribution
+
+1. **Linux-Only Optimization** (Phase 0)
+   - Remove Windows/macOS code
+   - Optimize for Linux syscalls
+   - Improve /proc parsing efficiency
+
+2. **Process Telemetry** (Phase 1)
+   - Enhanced /proc metrics collection
+   - Top-N process tracking
+   - Service pattern detection
+
+3. **Auto-Configuration** (Phase 2)
+   - Service discovery modules
+   - Configuration templates
+   - Integration receivers
 
 ### OpenTelemetry Processors
 
-When creating or modifying processors:
-
-1. Implement all required interfaces from `otel-processor-common`
+When working on processors:
+1. Focus on Linux-specific optimizations
 2. Add comprehensive unit tests
-3. Include benchmarks for performance-critical code
+3. Include benchmarks
 4. Document configuration options
-5. Add integration tests in `e2e-tests`
 
-### CLI Commands
+### Future CLI Commands
 
-For `nrdot-ctl` commands:
+Planned commands for contribution:
+- `nrdot-host discover` - Service discovery (Phase 2)
+- `nrdot-host migrate-infra` - Migration tool (Phase 3)
+- `nrdot-host validate` - Config validation
 
-1. Use cobra for command structure
-2. Provide helpful descriptions and examples
-3. Support both flags and config files
-4. Include completion scripts
-5. Test interactive and non-interactive modes
+Guidelines:
+1. Follow existing command patterns
+2. Add comprehensive help text
+3. Include examples
+4. Test on multiple Linux distributions
 
 ## Release Process
 
@@ -157,9 +184,10 @@ For `nrdot-ctl` commands:
 
 ## Getting Help
 
-- Join the [Discussions](https://github.com/deepaucksharma/nrdot-host/discussions)
-- Check the [troubleshooting guide](./docs/troubleshooting.md)
-- Ask questions in issues with the `question` label
+- Review the [Roadmap](docs/roadmap/ROADMAP.md)
+- Check the [Architecture](docs/architecture/ARCHITECTURE.md)
+- Ask questions in GitHub Issues
+- See [Troubleshooting Guide](docs/troubleshooting.md)
 
 ## Recognition
 

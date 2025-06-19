@@ -4,39 +4,48 @@
   <img src="https://img.shields.io/badge/OpenTelemetry-Native-blue" alt="OpenTelemetry">
   <img src="https://img.shields.io/badge/License-Apache%202.0-green" alt="License">
   <img src="https://img.shields.io/badge/Go-1.21+-00ADD8?logo=go" alt="Go Version">
-  <img src="https://github.com/deepaucksharma/nrdot-host/actions/workflows/ci.yml/badge.svg" alt="CI Status">
   <img src="https://img.shields.io/badge/Platform-Linux-FCC624?logo=linux" alt="Linux">
 </p>
 
 <p align="center">
-  <b>Next-generation Linux host monitoring with auto-configuration and OpenTelemetry-native architecture</b>
+  <b>New Relic's canonical Linux telemetry collector with intelligent auto-configuration</b>
 </p>
 
 ## 🎯 Overview
 
-NRDOT-HOST is evolving to become New Relic's canonical Linux telemetry collector, providing intelligent auto-configuration and comprehensive host monitoring through OpenTelemetry:
+NRDOT-HOST is New Relic's next-generation Linux telemetry collector built on OpenTelemetry. Currently in v2.0 with unified architecture, it's evolving to provide intelligent auto-configuration for zero-touch monitoring.
 
-- **🤖 Auto-Configuration**: Zero-touch service discovery and configuration
-- **🐧 Linux-First**: Optimized for Linux hosts and processes
-- **🔄 Seamless Migration**: Easy transition from legacy Infrastructure agent
-- **📊 OpenTelemetry Native**: Built on OTel Collector with custom enhancements
-- **🔒 Enterprise Security**: Automatic secret redaction, secure defaults
+### Current Features (v2.0)
+- **Unified Binary**: All components in a single process
+- **OpenTelemetry Native**: Built on OTel Collector, not a fork
+- **Linux Optimized**: Designed specifically for Linux hosts
+- **Custom Processors**: Security, enrichment, transformation, and capping
+- **Blue-Green Reload**: Configuration updates without downtime
 
-## 🚀 Vision & Roadmap
+### Coming Soon (4-Month Roadmap)
+- **Auto-Configuration**: Automatic service discovery and setup
+- **Enhanced Process Monitoring**: Top-N processes via /proc
+- **Remote Configuration**: Centralized config management
+- **Migration Tools**: Automated Infrastructure agent transition
 
-NRDOT-HOST is transforming into an intelligent, self-configuring host agent that automatically discovers and monitors services on your Linux infrastructure:
+## 🚀 Roadmap
 
-### Current State (v2.0)
-- ✅ Unified binary architecture
-- ✅ Host metrics, logs, and OTLP gateway
-- ✅ Custom processors for security and enrichment
-- ✅ Blue-green configuration reloads
+### Phase 1: Top-N Process Telemetry (4 weeks)
+- Enhanced process monitoring using /proc
+- Top CPU/memory process tracking
+- Service detection by process patterns
 
-### Coming Soon (3-6 months)
-- 🎯 **Auto-Configuration**: Agent detects services and configures itself
-- 🎯 **Remote Config**: Centralized configuration management
-- 🎯 **Enhanced Process Monitoring**: Detailed process visibility
-- 🎯 **Migration Tools**: Automated transition from Infrastructure agent
+### Phase 2: Intelligent Auto-Configuration (6 weeks)
+- Automatic service discovery (MySQL, Redis, Nginx, etc.)
+- Remote configuration from New Relic
+- Dynamic pipeline generation
+
+### Phase 3: GA & Migration (4 weeks)
+- Infrastructure agent migration tools
+- Production packaging (.deb/.rpm)
+- Enterprise features
+
+See [Full Roadmap](docs/roadmap/ROADMAP.md) for detailed timeline and deliverables.
 
 ## 📦 Installation
 
@@ -79,55 +88,52 @@ service:
 
 license_key: YOUR_NEW_RELIC_LICENSE_KEY
 
-# Optional: Control auto-configuration
-auto_config:
-  enabled: true              # Default: true
-  scan_interval: 5m          # How often to detect new services
-  
-# All other configuration is automatic!
+# Future: Auto-configuration (Phase 2)
+# auto_config:
+#   enabled: true          # Will be default in v3.0
+#   scan_interval: 5m      # Service detection interval
 ```
 
-### Auto-Configuration in Action
+### Future: Auto-Configuration (Phase 2)
 
-When NRDOT-HOST starts, it automatically:
-1. **Scans** for running services (MySQL, Redis, Nginx, etc.)
-2. **Reports** discovered services to New Relic
-3. **Receives** optimized configuration for your environment
-4. **Applies** monitoring for detected services
-5. **Updates** as services change
+When auto-configuration is released, NRDOT-HOST will:
+1. **Scan** for running services (MySQL, Redis, Nginx, etc.)
+2. **Report** discovered services to New Relic
+3. **Receive** optimized configuration
+4. **Apply** monitoring automatically
+5. **Update** as services change
 
-No manual integration configuration needed!
+Until then, services must be configured manually in the YAML file.
 
 ## 🏗️ Architecture
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│                NRDOT-HOST (Linux)                   │
+│           NRDOT-HOST v2.0 (Unified Binary)          │
 ├─────────────────────────────────────────────────────┤
-│  ┌─────────────────┐  ┌────────────────────────┐   │
-│  │ Auto-Config     │  │ Remote Config Client   │   │
-│  │ - Service       │  │ - Fetch configs        │   │
-│  │   Discovery     │  │ - Apply updates        │   │
-│  │ - Port Scan     │  │ - Rollback support     │   │
-│  │ - Process List  │  │                        │   │
-│  └────────┬────────┘  └───────────┬────────────┘   │
-│           │                        │                 │
-│  ┌────────▼────────────────────────▼─────────────┐  │
-│  │           Configuration Engine                │  │
-│  │  - Template library for integrations          │  │
-│  │  - Dynamic pipeline generation                │  │
-│  │  - Validation and merge logic                 │  │
-│  └────────────────────┬──────────────────────────┘  │
-│                       │                              │
-│  ┌────────────────────▼──────────────────────────┐  │
-│  │         OpenTelemetry Collector Core          │  │
-│  │                                               │  │
-│  │  Receivers:        Processors:    Exporters: │  │
-│  │  - hostmetrics    - nrsecurity    - otlp     │  │
-│  │  - filelog        - nrenrich      (to NR)    │  │
-│  │  - otlp           - nrtransform              │  │
-│  │  - [auto-added]   - nrcap                    │  │
-│  └───────────────────────────────────────────────┘  │
+│                                                     │
+│  ┌─────────────────────────────────────────────┐   │
+│  │          Supervisor (Main Process)           │   │
+│  │  - Collector lifecycle management            │   │
+│  │  - Configuration validation                  │   │
+│  │  - API server (health, status)               │   │
+│  │  - Blue-green reload orchestration           │   │
+│  └───────────────────┬─────────────────────────┘   │
+│                      │                              │
+│  ┌───────────────────▼─────────────────────────┐   │
+│  │         OpenTelemetry Collector Core        │   │
+│  │                                             │   │
+│  │  Receivers:        Processors:  Exporters: │   │
+│  │  - hostmetrics    - nrsecurity  - otlp     │   │
+│  │  - filelog        - nrenrich               │   │
+│  │  - otlp           - nrtransform            │   │
+│  │                   - nrcap                  │   │
+│  └─────────────────────────────────────────────┘   │
+│                                                     │
+│  Future Components (Phase 2):                       │
+│  [ ] Auto-Configuration Engine                      │
+│  [ ] Service Discovery                              │
+│  [ ] Remote Config Client                           │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -139,15 +145,14 @@ No manual integration configuration needed!
 - **Process Info**: Process count, top processes by CPU/memory
 - **Host Metadata**: Cloud attributes, OS info, hostname
 
-### Auto-Discovered Services
-When services are detected, monitoring is automatically enabled:
-- **MySQL**: Performance metrics, slow query logs
+### Future: Auto-Discovered Services (Phase 2)
+When auto-configuration is released, these services will be automatically monitored:
+- **MySQL/MariaDB**: Performance metrics, slow query logs
 - **PostgreSQL**: Database statistics, connection metrics
 - **Redis**: Operations, memory, persistence metrics
 - **Nginx**: Request rates, connection stats
 - **Apache**: Worker stats, request performance
-- **Docker**: Container metrics and logs
-- *...and more!*
+- *More services added in Phase 2.5*
 
 ### Custom Applications
 - **OTLP Gateway**: Applications can send traces/metrics to localhost:4317
@@ -155,18 +160,18 @@ When services are detected, monitoring is automatically enabled:
 
 ## 🔄 Migrating from Infrastructure Agent
 
-### Automated Migration (Coming Soon)
+### Future: Automated Migration (Phase 3)
 
 ```bash
-# One command migration
+# Coming in Phase 3
 sudo nrdot-host migrate-infra
 
-# What it does:
-# 1. Detects existing Infrastructure agent
-# 2. Migrates configuration and license key
-# 3. Preserves custom attributes and tags
-# 4. Stops old agent, starts new agent
-# 5. Validates data flow to New Relic
+# What it will do:
+# 1. Detect existing Infrastructure agent
+# 2. Convert configuration format
+# 3. Migrate license key
+# 4. Preserve custom attributes
+# 5. Validate metrics continuity
 ```
 
 ### Manual Migration
@@ -199,44 +204,53 @@ curl http://localhost:8090/health
 # View logs
 journalctl -u nrdot-host -f
 
-# Test configuration
-nrdot-host validate --config /etc/nrdot/config.yaml
-
 # Debug mode
-nrdot-host --log-level=debug
+sudo nrdot-host --mode=all --log-level=debug
+
+# Test configuration (manual validation)
+nrdot-host --mode=all --config=/etc/nrdot/config.yaml --dry-run
 ```
 
-### Manual Configuration Override
+### Manual Configuration (Current)
 
-If you need to disable auto-config or customize:
+Until auto-configuration is available, configure services manually:
 
 ```yaml
-# Disable auto-configuration
-auto_config:
-  enabled: false
-
-# Manual service configuration (advanced)
+# Example: Add MySQL monitoring
 receivers:
   mysql:
     endpoint: localhost:3306
     username: monitor
-    # ... custom settings
+    password: ${env:MYSQL_PASSWORD}
+    collection_interval: 60s
+
+# Add receiver to pipeline
+service:
+  pipelines:
+    metrics:
+      receivers: [hostmetrics, mysql]
 ```
 
 ## 📈 Performance
 
-- **Memory**: ~150MB base (vs 250MB legacy agent)
+### Current (v2.0)
+- **Memory**: ~300MB (unified binary)
+- **CPU**: 2-5% idle usage
+- **Startup**: ~3 seconds
+- **Config Reload**: <100ms (blue-green)
+
+### Target (Phase 3 GA)
+- **Memory**: <150MB
 - **CPU**: <2% idle usage
-- **Startup**: <3 seconds
-- **Config Reload**: <100ms (zero downtime)
-- **Throughput**: 1M+ metrics/second capable
+- **Process Discovery**: <5 seconds
+- **Service Detection**: <30 seconds
 
 ## 🔒 Security
 
-- **Automatic Secret Redaction**: Passwords, tokens, keys are never sent
-- **Minimal Privileges**: Runs as non-root with selective elevated access
-- **Secure Communication**: TLS 1.3 to New Relic endpoints
-- **No eBPF Required**: Traditional secure methods for compatibility
+- **Automatic Secret Redaction**: nrsecurity processor prevents credential leaks
+- **Privileged Helper**: Secure elevation for specific operations (setuid)
+- **TLS 1.3**: Encrypted communication to New Relic
+- **No eBPF**: Uses traditional /proc methods for compatibility
 
 ## 🤝 Contributing
 
@@ -250,33 +264,36 @@ Key areas for contribution:
 
 ## 📚 Documentation
 
-- [Architecture Overview](ARCHITECTURE_V2.md)
-- [Auto-Configuration Guide](AUTO_CONFIGURATION.md)
-- [Migration Guide](INFRASTRUCTURE_MIGRATION.md)
+- [Architecture Overview](docs/architecture/ARCHITECTURE.md)
+- [Roadmap Details](docs/roadmap/ROADMAP.md)
 - [Configuration Reference](docs/configuration.md)
 - [Troubleshooting](docs/troubleshooting.md)
 
-## 🗺️ Roadmap
+### Future Documentation
+- [Auto-Configuration Guide](docs/auto-config/AUTO_CONFIGURATION.md) (Phase 2)
+- [Migration Guide](docs/migration/INFRASTRUCTURE_MIGRATION.md) (Phase 3)
 
-### Phase 0: Foundation (Current)
-- ✅ Unified architecture
-- ✅ Core telemetry collection
-- ✅ Linux packaging
+## 🛠️ Development Status
 
-### Phase 1: Core Features (1 month)
-- 🔄 Enhanced process monitoring
-- 🔄 Service detection framework
-- 🔄 Privileged helper integration
+### Implemented (v2.0)
+- ✅ Unified binary architecture
+- ✅ Host metrics and logs collection
+- ✅ Custom processors (security, enrichment, transform, cap)
+- ✅ Blue-green configuration reload
+- ✅ Basic privileged helper
 
-### Phase 2: Auto-Configuration (1.5 months)
-- 🎯 Automatic service discovery
-- 🎯 Remote configuration API
-- 🎯 Dynamic pipeline management
+### In Progress
+- 🔄 Linux-only optimization (removing cross-platform code)
+- 🔄 Enhanced process telemetry planning
 
-### Phase 3: GA Release (1 month)
-- 📦 Migration tooling
-- 📦 Production packaging
-- 📦 Enterprise support
+### Not Yet Implemented
+- ❌ Auto-configuration engine
+- ❌ Service discovery
+- ❌ Remote configuration
+- ❌ Migration tools
+- ❌ Process telemetry integration
+
+See [Roadmap](docs/roadmap/ROADMAP.md) for implementation timeline.
 
 ## 📄 License
 
@@ -285,6 +302,6 @@ Apache License 2.0 - see [LICENSE](LICENSE) for details.
 ---
 
 <p align="center">
-  <b>NRDOT-HOST: The future of Linux host monitoring is here</b><br>
-  Simple • Intelligent • OpenTelemetry-Native
+  <b>NRDOT-HOST: Building the future of Linux host monitoring</b><br>
+  OpenTelemetry-Native • Auto-Configuring • Enterprise-Ready
 </p>

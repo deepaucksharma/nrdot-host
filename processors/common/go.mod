@@ -1,4 +1,4 @@
-module github.com/newrelic/nrdot-host/otel-processor-common
+module github.com/newrelic/nrdot-host/processors/common
 
 go 1.21
 

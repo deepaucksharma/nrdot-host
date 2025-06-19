@@ -1,4 +1,4 @@
-module github.com/newrelic/nrdot-host/otel-processor-nrcap
+module github.com/newrelic/nrdot-host/processors/nrcap
 
 go 1.21
 

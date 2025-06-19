@@ -2,7 +2,6 @@ package supervisor
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 
@@ -30,7 +29,7 @@ func (s *UnifiedSupervisor) SetupAuthenticatedAPIServer(authConfig auth.Config) 
 
 	if authConfig.Enabled {
 		switch authConfig.Type {
-		case auth.AuthTypeJWT, auth.AuthTypeBoth:
+		case auth.AuthTypeJWT:
 			// Create JWT manager
 			var err error
 			jwtManager, err = auth.NewJWTManager(
@@ -43,7 +42,7 @@ func (s *UnifiedSupervisor) SetupAuthenticatedAPIServer(authConfig auth.Config) 
 			}
 			s.logger.Info("JWT authentication enabled")
 
-		case auth.AuthTypeAPIKey, auth.AuthTypeBoth:
+		case auth.AuthTypeAPIKey:
 			// Create token store
 			tokenStore = auth.NewTokenStore()
 			
@@ -63,6 +62,38 @@ func (s *UnifiedSupervisor) SetupAuthenticatedAPIServer(authConfig auth.Config) 
 					zap.String("user", info.UserID))
 			}
 			s.logger.Info("API key authentication enabled")
+			
+		case auth.AuthTypeBoth:
+			// Create both JWT manager and token store
+			var err error
+			jwtManager, err = auth.NewJWTManager(
+				authConfig.JWT.SecretKey,
+				authConfig.JWT.Duration,
+				authConfig.JWT.Issuer,
+			)
+			if err != nil {
+				return fmt.Errorf("failed to create JWT manager: %w", err)
+			}
+			
+			tokenStore = auth.NewTokenStore()
+			
+			// Create default admin token if configured
+			if authConfig.DefaultAdmin.APIKey != "" {
+				info, err := tokenStore.CreateToken(
+					authConfig.DefaultAdmin.Username,
+					auth.RoleAdmin,
+					"Default admin token",
+					authConfig.APIKey.DefaultExpiration,
+				)
+				if err != nil {
+					return fmt.Errorf("failed to create default admin token: %w", err)
+				}
+				s.logger.Info("Default admin API key created", 
+					zap.String("token", info.Token),
+					zap.String("user", info.UserID))
+			}
+			
+			s.logger.Info("Both JWT and API key authentication enabled")
 		}
 	}
 
@@ -84,7 +115,7 @@ func (s *UnifiedSupervisor) SetupAuthenticatedAPIServer(authConfig auth.Config) 
 	// Read-only endpoints
 	v1.HandleFunc("/status", s.apiHandlers.Status).Methods("GET")
 	v1.HandleFunc("/config", s.apiHandlers.GetConfig).Methods("GET")
-	v1.HandleFunc("/metrics", s.apiHandlers.Metrics).Methods("GET")
+	v1.HandleFunc("/metrics", s.apiHandlers.GetMetrics).Methods("GET")
 
 	// Write endpoints (require higher permissions)
 	if authConfig.Enabled {

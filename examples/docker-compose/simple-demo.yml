@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  # NRDOT-HOST in simple mode
+  nrdot-host:
+    image: nrdot-host:latest
+    container_name: nrdot-host-demo
+    restart: unless-stopped
+    environment:
+      - NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY}
+      - NRDOT_SERVICE_NAME=demo-host
+      - NRDOT_ENVIRONMENT=demo
+      - LOG_LEVEL=debug
+      - RUN_DISCOVERY_FIRST=true
+    ports:
+      - "8080:8080"   # API Server
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+    volumes:
+      - ./config.yaml:/etc/nrdot/config.yaml:ro
+      - nrdot_data:/var/lib/nrdot
+      - nrdot_logs:/var/log/nrdot
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Sample application that sends telemetry
+  sample-app:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: sample-app
+    restart: unless-stopped
+    command: ["--config=/etc/otel/config.yaml"]
+    volumes:
+      - ./sample-app-config.yaml:/etc/otel/config.yaml:ro
+    environment:
+      - METRICS_ENDPOINT=http://nrdot-host:4318/v1/metrics
+      - TRACES_ENDPOINT=http://nrdot-host:4318/v1/traces
+    depends_on:
+      - nrdot-host
+
+  # Redis for auto-discovery testing
+  redis:
+    image: redis:alpine
+    container_name: demo-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+  # Nginx for auto-discovery testing  
+  nginx:
+    image: nginx:alpine
+    container_name: demo-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx-status.conf:/etc/nginx/conf.d/status.conf:ro
+
+volumes:
+  nrdot_data:
+  nrdot_logs:
+
+networks:
+  default:
+    name: nrdot-demo
